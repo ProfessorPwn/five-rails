@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getConnections, createConnection, logActivity } from "@/lib/db";
-import { validateRequired, sanitizeBody } from "@/lib/validation";
+import { validateRequired, sanitizeBody, safeParseJson, isValidProvider } from "@/lib/validation";
 
 export async function GET() {
   try {
@@ -17,9 +17,16 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const raw = await request.json();
+    const raw = await safeParseJson(request);
+    if (!raw) return NextResponse.json({ error: "Invalid or missing JSON body" }, { status: 400 });
     const err = validateRequired(raw, ["provider"]);
     if (err) return NextResponse.json({ error: err }, { status: 400 });
+    if (!isValidProvider(String(raw.provider))) {
+      return NextResponse.json(
+        { error: "Invalid provider. Must be one of: openai, anthropic, ollama, perplexity, exa, firecrawl" },
+        { status: 400 }
+      );
+    }
     const body = sanitizeBody(raw);
     const connection = await createConnection(body);
     await logActivity({

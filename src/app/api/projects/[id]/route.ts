@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProject, updateProject, deleteProject, logActivity } from "@/lib/db";
+import { safeParseJson } from "@/lib/validation";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -23,7 +24,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const body = await request.json();
+    const body = await safeParseJson(request);
+    if (!body) return NextResponse.json({ error: "Invalid or missing JSON body" }, { status: 400 });
     const project = await updateProject(id, body);
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });

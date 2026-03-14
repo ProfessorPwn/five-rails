@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getConnections, logActivity } from "@/lib/db";
+import { safeParseJson } from "@/lib/validation";
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = await safeParseJson(request);
+    if (!body) return NextResponse.json({ error: "Invalid or missing JSON body" }, { status: 400 });
     const { message, project_id, skill_id } = body;
 
     if (!message) {

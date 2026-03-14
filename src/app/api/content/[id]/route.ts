@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateContent, logActivity } from "@/lib/db";
+import { safeParseJson } from "@/lib/validation";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const body = await request.json();
+    const body = await safeParseJson(request);
+    if (!body) return NextResponse.json({ error: "Invalid or missing JSON body" }, { status: 400 });
     const content = await updateContent(id, body);
     if (!content) {
       return NextResponse.json(

@@ -10,13 +10,11 @@ import EmptyState from "@/components/ui/EmptyState";
 
 interface Connection {
   id: string;
-  name: string;
-  type: string;
+  provider: string;
+  api_key_encrypted: string | null;
   base_url: string;
-  api_key: string;
   model: string;
-  status: string;
-  active: number;
+  is_active: number;
   created_at: string;
 }
 
@@ -26,8 +24,7 @@ export default function ConnectionsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
-    name: "",
-    type: "ollama",
+    provider: "ollama",
     base_url: "",
     api_key: "",
     model: "",
@@ -51,13 +48,19 @@ export default function ConnectionsPage() {
     e.preventDefault();
     setCreating(true);
     try {
+      const payload: Record<string, unknown> = {
+        provider: form.provider,
+        base_url: form.base_url || undefined,
+        model: form.model || undefined,
+      };
+      if (form.api_key) payload.api_key_encrypted = form.api_key;
       const res = await fetch("/api/connections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
-        setForm({ name: "", type: "ollama", base_url: "", api_key: "", model: "" });
+        setForm({ provider: "ollama", base_url: "", api_key: "", model: "" });
         setShowCreate(false);
         fetchConnections();
       }
@@ -67,12 +70,12 @@ export default function ConnectionsPage() {
   };
 
   const handleToggle = async (conn: Connection) => {
-    const newStatus = conn.status === "active" || conn.active ? "inactive" : "active";
+    const newActive = conn.is_active ? false : true;
     try {
       await fetch(`/api/connections/${conn.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus, active: newStatus === "active" ? 1 : 0 }),
+        body: JSON.stringify({ is_active: newActive }),
       });
       fetchConnections();
     } catch {
@@ -169,19 +172,19 @@ export default function ConnectionsPage() {
       ) : (
         <div className="space-y-3">
           {connections.map((conn) => {
-            const isActive = conn.status === "active" || !!conn.active;
+            const isActive = !!conn.is_active;
             return (
               <Card key={conn.id} hover={false} className="flex items-center gap-4">
                 <div className={`${isActive ? "text-amber-400" : "text-[#64748b]"}`}>
-                  {providerIcons[conn.type] || providerIcons.ollama}
+                  {providerIcons[conn.provider] || providerIcons.ollama}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-semibold text-[#e2e8f0]">
-                      {conn.name || conn.type}
+                      {conn.provider}
                     </h3>
-                    <Badge variant={conn.type === "ollama" ? "emerald" : conn.type === "openai" ? "blue" : conn.type === "anthropic" ? "violet" : "rose"}>
-                      {conn.type}
+                    <Badge variant={conn.provider === "ollama" ? "emerald" : conn.provider === "openai" ? "blue" : conn.provider === "anthropic" ? "violet" : "rose"}>
+                      {conn.provider}
                     </Badge>
                   </div>
                   <div className="flex items-center gap-3 mt-1">
@@ -229,19 +232,13 @@ export default function ConnectionsPage() {
       {/* Create Modal */}
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Add Connection">
         <form onSubmit={handleCreate} className="space-y-4">
-          <Input
-            label="Name"
-            placeholder="e.g. My Ollama"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
           <Select
             label="Provider"
-            value={form.type}
+            value={form.provider}
             onChange={(e) => {
               const t = e.target.value;
               const defaults = providerDefaults[t] || { base_url: "", model: "" };
-              setForm({ ...form, type: t, base_url: defaults.base_url, model: defaults.model });
+              setForm({ ...form, provider: t, base_url: defaults.base_url, model: defaults.model });
             }}
             options={[
               { value: "ollama", label: "Ollama" },
@@ -256,7 +253,7 @@ export default function ConnectionsPage() {
             value={form.base_url}
             onChange={(e) => setForm({ ...form, base_url: e.target.value })}
           />
-          {form.type !== "ollama" && (
+          {form.provider !== "ollama" && (
             <Input
               label="API Key"
               type="password"

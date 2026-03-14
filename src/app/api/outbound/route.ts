@@ -5,7 +5,7 @@ import {
   createContact,
   logActivity,
 } from "@/lib/db";
-import { validateRequired, sanitizeBody, isValidEmail } from "@/lib/validation";
+import { validateRequired, sanitizeBody, isValidEmail, safeParseJson } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,7 +26,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const raw = await request.json();
+    const raw = await safeParseJson(request);
+    if (!raw) return NextResponse.json({ error: "Invalid or missing JSON body" }, { status: 400 });
     const err = validateRequired(raw, ["name"]);
     if (err) return NextResponse.json({ error: err }, { status: 400 });
     if (raw.email && !isValidEmail(raw.email)) {

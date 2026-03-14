@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInsights, createInsight, logActivity } from "@/lib/db";
-import { validateRequired, sanitizeBody } from "@/lib/validation";
+import { validateRequired, sanitizeBody, safeParseJson } from "@/lib/validation";
 
 export async function GET() {
   try {
@@ -17,7 +17,8 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const raw = await request.json();
+    const raw = await safeParseJson(request);
+    if (!raw) return NextResponse.json({ error: "Invalid or missing JSON body" }, { status: 400 });
     const err = validateRequired(raw, ["title"]);
     if (err) return NextResponse.json({ error: err }, { status: 400 });
     const body = sanitizeBody(raw, ["description", "pain_point", "solution"]);

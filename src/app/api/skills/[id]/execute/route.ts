@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSkill, logActivity } from "@/lib/db";
+import { safeParseJson } from "@/lib/validation";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const body = await request.json();
+    const body = await safeParseJson(request);
+    if (!body) return NextResponse.json({ error: "Invalid or missing JSON body" }, { status: 400 });
     const { project_id, input } = body;
 
     if (!input) {

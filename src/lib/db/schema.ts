@@ -94,7 +94,7 @@ function initSchema(db: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS content_pieces (
       id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
+      project_id TEXT,
       type TEXT NOT NULL CHECK(type IN ('post', 'email', 'script', 'lead_magnet', 'landing_page')),
       title TEXT NOT NULL,
       content TEXT,
@@ -107,7 +107,7 @@ function initSchema(db: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS outbound_contacts (
       id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
+      project_id TEXT,
       name TEXT NOT NULL,
       email TEXT,
       company TEXT,

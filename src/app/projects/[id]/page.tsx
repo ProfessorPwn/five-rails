@@ -232,7 +232,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               </div>
             </div>
 
-            {/* Quick Stats */}
+            <div>
+              <h2 className="text-sm font-semibold text-[#94a3b8] uppercase tracking-wider mb-3">
+                Quick Stats
+              </h2>
             <div className="grid grid-cols-3 gap-4">
               <Card hover={false}>
                 <div className="text-xs text-[#64748b] mb-1">Activities</div>
@@ -248,6 +251,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   {new Date(project.created_at).toLocaleDateString()}
                 </div>
               </Card>
+            </div>
             </div>
 
             {/* What's Next */}

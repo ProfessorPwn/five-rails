@@ -5,6 +5,7 @@ import {
   createContent,
   logActivity,
 } from "@/lib/db";
+import { validateRequired, sanitizeBody } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
@@ -25,11 +26,15 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const raw = await request.json();
+    const err = validateRequired(raw, ["type", "title"]);
+    if (err) return NextResponse.json({ error: err }, { status: 400 });
+    const body = sanitizeBody(raw, ["content"]);
+    if (body.project_id === "") body.project_id = undefined;
     const content = await createContent(body);
     await logActivity({
       action: "content_created",
-      project_id: body.project_id,
+      project_id: body.project_id || undefined,
       details: `Created content: ${body.title || "Untitled"}`,
     });
     return NextResponse.json(content, { status: 201 });

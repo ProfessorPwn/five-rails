@@ -411,7 +411,7 @@ export function getProjectContent(projectId: string): ContentPiece[] {
 }
 
 export function createContent(data: {
-  project_id: string;
+  project_id?: string;
   type: ContentPiece['type'];
   title: string;
   content?: string;
@@ -425,7 +425,7 @@ export function createContent(data: {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
-    data.project_id,
+    data.project_id || null,
     data.type,
     data.title,
     data.content ?? null,
@@ -475,7 +475,7 @@ export function getProjectContacts(projectId: string): OutboundContact[] {
 }
 
 export function createContact(data: {
-  project_id: string;
+  project_id?: string;
   name: string;
   email?: string;
   company?: string;
@@ -490,7 +490,7 @@ export function createContact(data: {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
-    data.project_id,
+    data.project_id || null,
     data.name,
     data.email ?? null,
     data.company ?? null,

@@ -33,6 +33,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "invalid email format" }, { status: 400 });
     }
     const body = sanitizeBody(raw, ["notes"]);
+    if (body.project_id === "") body.project_id = undefined;
     const contact = await createContact(body);
     await logActivity({
       action: "contact_created",

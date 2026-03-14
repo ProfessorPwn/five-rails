@@ -5,6 +5,7 @@ import {
   createContact,
   logActivity,
 } from "@/lib/db";
+import { validateRequired, sanitizeBody, isValidEmail } from "@/lib/validation";
 
 export async function GET(request: NextRequest) {
   try {
@@ -25,7 +26,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const raw = await request.json();
+    const err = validateRequired(raw, ["name"]);
+    if (err) return NextResponse.json({ error: err }, { status: 400 });
+    if (raw.email && !isValidEmail(raw.email)) {
+      return NextResponse.json({ error: "invalid email format" }, { status: 400 });
+    }
+    const body = sanitizeBody(raw, ["notes"]);
     const contact = await createContact(body);
     await logActivity({
       action: "contact_created",

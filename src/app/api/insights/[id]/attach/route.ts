@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { attachInsightToProject, logActivity } from "@/lib/db";
+import { attachInsightToProject, getProject, logActivity } from "@/lib/db";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -12,6 +12,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "project_id is required" },
         { status: 400 }
+      );
+    }
+
+    const project = await getProject(body.project_id);
+    if (!project) {
+      return NextResponse.json(
+        { error: "Project not found" },
+        { status: 404 }
       );
     }
 

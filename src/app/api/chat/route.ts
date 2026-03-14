@@ -58,11 +58,28 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    const upstream = await fetch(apiUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(requestBody),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    let upstream: Response;
+    try {
+      upstream = await fetch(apiUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+    } catch (err: unknown) {
+      clearTimeout(timeout);
+      if (err instanceof Error && err.name === "AbortError") {
+        return NextResponse.json(
+          { error: "LLM request timed out (30s). The model may still be loading." },
+          { status: 504 }
+        );
+      }
+      throw err;
+    }
+    clearTimeout(timeout);
 
     if (!upstream.ok) {
       const errorText = await upstream.text();

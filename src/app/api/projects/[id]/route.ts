@@ -46,12 +46,15 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    await deleteProject(id);
+    const project = await getProject(id);
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
     await logActivity({
       action: "project_deleted",
-      project_id: id,
-      details: `Deleted project: ${id}`,
+      details: `Deleted project: ${project.name}`,
     });
+    await deleteProject(id);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("DELETE /api/projects/[id] error:", error);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInsights, createInsight, logActivity } from "@/lib/db";
+import { validateRequired, sanitizeBody } from "@/lib/validation";
 
 export async function GET() {
   try {
@@ -16,7 +17,10 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const raw = await request.json();
+    const err = validateRequired(raw, ["title"]);
+    if (err) return NextResponse.json({ error: err }, { status: 400 });
+    const body = sanitizeBody(raw, ["description", "pain_point", "solution"]);
     const insight = await createInsight(body);
     await logActivity({
       action: "insight_created",

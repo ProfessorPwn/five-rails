@@ -16,8 +16,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     await logActivity({
       action: "contact_updated",
-      project_id: body.project_id,
-      details: `Updated contact: ${id}`,
+      project_id: contact.project_id || undefined,
+      details: `Updated contact: ${contact.name || id}`,
     });
     return NextResponse.json(contact);
   } catch (error) {

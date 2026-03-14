@@ -24,8 +24,10 @@ interface Project {
 
 interface Activity {
   id: string;
-  type: string;
-  description: string;
+  action: string;
+  details: string;
+  rail?: string;
+  skill_used?: string;
   created_at: string;
 }
 
@@ -284,7 +286,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 Add Task
               </Button>
             </div>
-            {activity.filter((a) => a.type.includes("task") || a.type.includes("project")).length === 0 ? (
+            {activity.filter((a) => (a.action || "").includes("task") || (a.action || "").includes("project")).length === 0 ? (
               <EmptyState
                 title="No tasks yet"
                 description="Create tasks to track your project progress."
@@ -294,11 +296,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             ) : (
               <div className="space-y-2">
                 {activity
-                  .filter((a) => a.type.includes("task") || a.type.includes("project"))
+                  .filter((a) => (a.action || "").includes("task") || (a.action || "").includes("project"))
                   .map((item) => (
                     <Card key={item.id} hover={false} className="!p-3 flex items-center gap-3">
                       <div className="w-4 h-4 rounded border border-[#1e293b] flex-shrink-0" />
-                      <span className="text-sm text-[#e2e8f0] flex-1">{item.description}</span>
+                      <span className="text-sm text-[#e2e8f0] flex-1">{item.details}</span>
                       <span className="text-[10px] text-[#64748b]">
                         {new Date(item.created_at).toLocaleDateString()}
                       </span>
@@ -363,10 +365,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     <div key={item.id} className="flex gap-4 relative">
                       <div className="w-4 h-4 rounded-full bg-[#141822] border-2 border-amber-500/40 shrink-0 mt-0.5 z-10" />
                       <div className="flex-1 pb-2">
-                        <p className="text-sm text-[#e2e8f0]">{item.description}</p>
+                        <p className="text-sm text-[#e2e8f0]">{item.details}</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Badge variant="default">
-                            {item.type.replace(/_/g, " ")}
+                            {(item.action || "").replace(/_/g, " ")}
                           </Badge>
                           <span className="text-[10px] text-[#64748b]">
                             {new Date(item.created_at).toLocaleString()}

@@ -27,9 +27,11 @@ interface Project {
 
 interface Activity {
   id: string;
-  type: string;
-  description: string;
+  action: string;
+  details: string;
   project_id?: string;
+  rail?: string;
+  skill_used?: string;
   created_at: string;
 }
 
@@ -223,9 +225,9 @@ export default function DashboardPage() {
                 <div key={item.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
                   <div className="w-2 h-2 rounded-full bg-amber-500/60 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-[#e2e8f0] truncate">{item.description}</p>
+                    <p className="text-sm text-[#e2e8f0] truncate">{item.details}</p>
                     <p className="text-[10px] text-[#64748b] mt-0.5">
-                      {formatActivityType(item.type)}
+                      {formatActivityType(item.action)}
                     </p>
                   </div>
                   <span className="text-[10px] text-[#64748b] shrink-0">
@@ -308,6 +310,7 @@ export default function DashboardPage() {
 }
 
 function formatActivityType(type: string): string {
+  if (!type) return "";
   return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 

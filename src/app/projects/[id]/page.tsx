@@ -94,6 +94,22 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   // Toggling task status (track in-flight toggles)
   const [togglingTaskIds, setTogglingTaskIds] = useState<Set<string>>(new Set());
 
+  // Recommended action execution
+  const [runningAction, setRunningAction] = useState<string | null>(null);
+  const [actionResult, setActionResult] = useState<{
+    actionId: string;
+    title: string;
+    output: string;
+    skillName: string;
+  } | null>(null);
+  const [savingResult, setSavingResult] = useState(false);
+  const [resultSaved, setResultSaved] = useState(false);
+
+  // Add contact form (for the outbound recommended action)
+  const [showAddContact, setShowAddContact] = useState(false);
+  const [contactForm, setContactForm] = useState({ name: "", email: "", company: "", role: "", notes: "" });
+  const [creatingContact, setCreatingContact] = useState(false);
+
   const fetchProject = useCallback(async () => {
     const res = await fetch(`/api/projects/${id}`);
     if (res.ok) {
@@ -276,6 +292,186 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       }
     } finally {
       setDeletingTask(false);
+    }
+  };
+
+  // ── Recommended Action Handlers ──────────────────────────────────────────
+
+  const actionConfig: Record<string, { skillId: string; buildInput: (p: Project) => string }> = {
+    "competitive-analysis": {
+      skillId: "skill-competitive-intel",
+      buildInput: (p) => [
+        `Analyze the competitive landscape for: ${p.niche || p.name}`,
+        p.target_audience ? `Target audience: ${p.target_audience}` : "",
+        p.description ? `Context: ${p.description}` : "",
+      ].filter(Boolean).join("\n"),
+    },
+    "landing-page": {
+      skillId: "skill-sales-page-surgeon",
+      buildInput: (p) => [
+        `Create a high-converting landing page for: ${p.name}`,
+        p.niche ? `Niche: ${p.niche}` : "",
+        p.target_audience ? `Target audience: ${p.target_audience}` : "",
+        p.description ? `Description: ${p.description}` : "",
+      ].filter(Boolean).join("\n"),
+    },
+    "market-monitoring": {
+      skillId: "skill-market-research",
+      buildInput: (p) => [
+        `Conduct comprehensive market research for: ${p.niche || p.name}`,
+        p.target_audience ? `Target audience: ${p.target_audience}` : "",
+        p.description ? `Context: ${p.description}` : "",
+        "Focus on: current market trends, emerging competitors, underserved segments, and actionable opportunities.",
+      ].filter(Boolean).join("\n"),
+    },
+  };
+
+  const actionTitles: Record<string, (p: Project) => string> = {
+    "competitive-analysis": (p) => `Competitive Analysis: ${p.niche || p.name}`,
+    "landing-page": (p) => `Landing Page Draft: ${p.name}`,
+    "market-monitoring": (p) => `Market Research: ${p.niche || p.name}`,
+  };
+
+  const handleRunAction = async (actionId: string) => {
+    if (!project) return;
+
+    if (actionId === "add-contacts") {
+      setContactForm({ name: "", email: "", company: "", role: "", notes: "" });
+      setShowAddContact(true);
+      return;
+    }
+
+    const config = actionConfig[actionId];
+    if (!config) return;
+
+    setRunningAction(actionId);
+    setActionResult(null);
+    setResultSaved(false);
+
+    try {
+      const res = await fetch(`/api/skills/${config.skillId}/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: id,
+          input: config.buildInput(project),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setActionResult({
+          actionId,
+          title: "Error",
+          output: data.error + (data.hint ? `\n\n${data.hint}` : ""),
+          skillName: "",
+        });
+        return;
+      }
+
+      setActionResult({
+        actionId,
+        title: actionTitles[actionId]?.(project) || "Result",
+        output: data.output || "",
+        skillName: data.skill_name || "",
+      });
+
+      fetchActivity();
+    } catch {
+      setActionResult({
+        actionId,
+        title: "Error",
+        output: "Failed to connect to the skill execution endpoint.",
+        skillName: "",
+      });
+    } finally {
+      setRunningAction(null);
+    }
+  };
+
+  const handleSaveActionResult = async () => {
+    if (!actionResult || !project) return;
+    setSavingResult(true);
+
+    try {
+      if (actionResult.actionId === "competitive-analysis") {
+        await fetch("/api/insights", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: actionResult.title,
+            description: actionResult.output,
+            source: actionResult.skillName,
+            category: "competitive_analysis",
+            project_id: id,
+          }),
+        });
+      } else if (actionResult.actionId === "landing-page") {
+        await fetch("/api/content", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "landing_page",
+            title: actionResult.title,
+            content: actionResult.output,
+            project_id: id,
+          }),
+        });
+      } else if (actionResult.actionId === "market-monitoring") {
+        await fetch("/api/insights", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: actionResult.title,
+            description: actionResult.output,
+            source: actionResult.skillName,
+            category: "market_research",
+            project_id: id,
+          }),
+        });
+        await fetch("/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: id,
+            title: "Review market changes and update analysis",
+            description: `Re-run market research for "${project.niche || project.name}" to track shifts in the competitive landscape, new entrants, and emerging trends.`,
+          }),
+        });
+        fetchTasks();
+      }
+
+      setResultSaved(true);
+      fetchActivity();
+    } finally {
+      setSavingResult(false);
+    }
+  };
+
+  const handleAddContact = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreatingContact(true);
+    try {
+      const res = await fetch("/api/outbound", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: id,
+          name: contactForm.name,
+          email: contactForm.email || undefined,
+          company: contactForm.company || undefined,
+          role: contactForm.role || undefined,
+          notes: contactForm.notes || undefined,
+        }),
+      });
+      if (res.ok) {
+        setContactForm({ name: "", email: "", company: "", role: "", notes: "" });
+        setShowAddContact(false);
+        fetchActivity();
+      }
+    } finally {
+      setCreatingContact(false);
     }
   };
 
@@ -476,27 +672,73 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               </div>
             </div>
 
-            {/* What's Next */}
+            {/* Recommended Actions */}
             <div>
               <h2 className="text-sm font-semibold text-[#94a3b8] uppercase tracking-wider mb-3">
                 Recommended Actions
               </h2>
               <div className="space-y-2">
-                {[
-                  "Run competitive analysis skill to validate your niche",
-                  "Add target contacts for outbound outreach",
-                  "Generate a landing page draft with the content skill",
-                  "Set up automated market monitoring",
-                ].map((action) => (
-                  <Card key={action} hover className="!p-3 flex items-center gap-3">
-                    <div className="text-amber-500">
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                        <path d="M3 7h8M8 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </div>
-                    <span className="text-sm text-[#e2e8f0]">{action}</span>
-                  </Card>
-                ))}
+                {([
+                  {
+                    id: "competitive-analysis",
+                    label: "Run competitive analysis to validate your niche",
+                    desc: "Analyzes competitors, positioning, and market opportunities",
+                    badge: "Search",
+                    badgeVariant: "info" as const,
+                  },
+                  {
+                    id: "add-contacts",
+                    label: "Add target contacts for outbound outreach",
+                    desc: "Create contacts to begin outreach for this project",
+                    badge: "Outbound",
+                    badgeVariant: "default" as const,
+                  },
+                  {
+                    id: "landing-page",
+                    label: "Generate a landing page draft",
+                    desc: "Creates a high-converting sales page with proven copy frameworks",
+                    badge: "Agent",
+                    badgeVariant: "warning" as const,
+                  },
+                  {
+                    id: "market-monitoring",
+                    label: "Set up automated market monitoring",
+                    desc: "Researches market trends and creates a recurring review task",
+                    badge: "Search",
+                    badgeVariant: "info" as const,
+                  },
+                ] as const).map((action) => {
+                  const isRunning = runningAction === action.id;
+                  return (
+                    <button
+                      key={action.id}
+                      onClick={() => handleRunAction(action.id)}
+                      disabled={!!runningAction}
+                      className={`w-full text-left cursor-pointer rounded-lg border border-[#1e293b] bg-[#141822] p-3 flex items-center gap-3 transition-all ${
+                        isRunning
+                          ? "opacity-80 border-amber-500/30"
+                          : runningAction
+                          ? "opacity-50 cursor-not-allowed"
+                          : "hover:border-amber-500/40 hover:bg-[#1a1f2e]"
+                      }`}
+                    >
+                      <div className="text-amber-500 shrink-0">
+                        {isRunning ? (
+                          <div className="w-[14px] h-[14px] animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                            <path d="M3 7h8M8 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm text-[#e2e8f0]">{action.label}</span>
+                        <p className="text-[10px] text-[#64748b] mt-0.5">{action.desc}</p>
+                      </div>
+                      <Badge variant={action.badgeVariant}>{action.badge}</Badge>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -841,6 +1083,106 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Action Result Modal */}
+      <Modal
+        open={!!actionResult}
+        onClose={() => { setActionResult(null); setResultSaved(false); }}
+        title={actionResult?.title || "Action Result"}
+        wide
+      >
+        {actionResult && (
+          <div className="space-y-4">
+            {actionResult.skillName && (
+              <div className="flex items-center gap-2">
+                <Badge variant="info">{actionResult.skillName}</Badge>
+                {resultSaved && <Badge variant="success">Saved to project</Badge>}
+              </div>
+            )}
+
+            <div className="bg-[#0f1118] border border-[#1e293b] rounded-lg p-4 max-h-[60vh] overflow-y-auto">
+              <pre className="text-sm text-[#e2e8f0] whitespace-pre-wrap font-mono leading-relaxed">
+                {actionResult.output}
+              </pre>
+            </div>
+
+            {actionResult.title !== "Error" && (
+              <div className="flex justify-end gap-3 pt-2">
+                <Button
+                  variant="ghost"
+                  onClick={() => { setActionResult(null); setResultSaved(false); }}
+                >
+                  {resultSaved ? "Close" : "Discard"}
+                </Button>
+                {!resultSaved && (
+                  <Button onClick={handleSaveActionResult} disabled={savingResult}>
+                    {savingResult ? (
+                      <>
+                        <div className="animate-spin rounded-full h-3 w-3 border border-current border-t-transparent" />
+                        Saving...
+                      </>
+                    ) : actionResult.actionId === "landing-page" ? (
+                      "Save as Landing Page"
+                    ) : actionResult.actionId === "market-monitoring" ? (
+                      "Save Insight & Create Task"
+                    ) : (
+                      "Save as Insight"
+                    )}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Add Contact Modal */}
+      <Modal open={showAddContact} onClose={() => setShowAddContact(false)} title="Add Outbound Contact">
+        <form onSubmit={handleAddContact} className="space-y-4">
+          <Input
+            label="Name"
+            placeholder="Contact name"
+            value={contactForm.name}
+            onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
+            required
+          />
+          <Input
+            label="Email"
+            type="email"
+            placeholder="email@company.com"
+            value={contactForm.email}
+            onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Company"
+              placeholder="Company name"
+              value={contactForm.company}
+              onChange={(e) => setContactForm({ ...contactForm, company: e.target.value })}
+            />
+            <Input
+              label="Role"
+              placeholder="e.g. CEO, VP Marketing"
+              value={contactForm.role}
+              onChange={(e) => setContactForm({ ...contactForm, role: e.target.value })}
+            />
+          </div>
+          <Textarea
+            label="Notes"
+            placeholder="Any notes about this contact..."
+            value={contactForm.notes}
+            onChange={(e) => setContactForm({ ...contactForm, notes: e.target.value })}
+          />
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" type="button" onClick={() => setShowAddContact(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={creatingContact || !contactForm.name.trim()}>
+              {creatingContact ? "Adding..." : "Add Contact"}
+            </Button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

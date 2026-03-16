@@ -57,6 +57,7 @@ export default function AudiencePage() {
   const [filterProject, setFilterProject] = useState("all");
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [error, setError] = useState("");
   const [editingContent, setEditingContent] = useState<ContentPiece | null>(null);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -106,7 +107,11 @@ export default function AudiencePage() {
         setForm({ title: "", type: "post", content: "", platform: "Twitter", status: "draft", project_id: "" });
         setShowCreate(false);
         fetchData();
+      } else {
+        setError("Failed to create content");
       }
+    } catch {
+      setError("Failed to create content");
     } finally {
       setCreating(false);
     }
@@ -151,7 +156,11 @@ export default function AudiencePage() {
       if (res.ok) {
         setEditingContent(null);
         fetchData();
+      } else {
+        setError("Failed to update content");
       }
+    } catch {
+      setError("Failed to update content");
     } finally {
       setEditing(false);
     }
@@ -160,10 +169,11 @@ export default function AudiencePage() {
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this content piece?")) return;
     try {
-      await fetch(`/api/content/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/content/${id}`, { method: "DELETE" });
+      if (!res.ok) setError("Failed to delete content");
       fetchData();
     } catch {
-      // ignore
+      setError("Failed to delete content");
     }
   };
 
@@ -262,6 +272,13 @@ export default function AudiencePage() {
           </Button>
         </div>
       </div>
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 flex items-center justify-between">
+          <span className="text-sm text-red-400">{error}</span>
+          <button onClick={() => setError("")} className="text-red-400 hover:text-red-300 cursor-pointer text-sm">&#x2715;</button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex items-center gap-3">
@@ -396,7 +413,8 @@ export default function AudiencePage() {
                       {dayContent.map((piece) => (
                         <div
                           key={piece.id}
-                          className={`text-[10px] px-1.5 py-0.5 rounded truncate ${
+                          onClick={() => openEditModal(piece)}
+                          className={`text-[10px] px-1.5 py-0.5 rounded truncate cursor-pointer hover:brightness-125 transition-all ${
                             typeColors[piece.type] === "blue"
                               ? "bg-blue-500/10 text-blue-400"
                               : typeColors[piece.type] === "violet"

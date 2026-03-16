@@ -58,7 +58,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [activity, setActivity] = useState<Activity[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [contacts, setContacts] = useState<{ id: string; name: string; status: string }[]>([]);
+  const [contentPieces, setContentPieces] = useState<{ id: string; type: string; title: string }[]>([]);
+  const [projectInsights, setProjectInsights] = useState<{ id: string; title: string; category: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   // Edit project
   const [showEditProject, setShowEditProject] = useState(false);
@@ -142,11 +146,31 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       fetchTasks(),
       fetchActivity(),
       fetch("/api/skills").then((r) => (r.ok ? r.json() : [])).catch(() => []),
-    ]).then(([, , , sk]) => {
+      fetch(`/api/outbound?project_id=${id}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch(`/api/content?project_id=${id}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch("/api/insights").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+    ]).then(([, , , sk, cts, cnt, ins]) => {
       setSkills(Array.isArray(sk) ? sk : []);
+      setContacts(Array.isArray(cts) ? cts : []);
+      setContentPieces(Array.isArray(cnt) ? cnt : []);
+      setProjectInsights(
+        (Array.isArray(ins) ? ins : []).filter((i: any) => i.project_id === id)
+      );
       setLoading(false);
     });
-  }, [fetchProject, fetchTasks, fetchActivity]);
+  }, [fetchProject, fetchTasks, fetchActivity, id]);
+
+  // Refresh data that drives step completion
+  const refreshStepData = useCallback(async () => {
+    const [cts, cnt, ins] = await Promise.all([
+      fetch(`/api/outbound?project_id=${id}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch(`/api/content?project_id=${id}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch("/api/insights").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+    ]);
+    setContacts(Array.isArray(cts) ? cts : []);
+    setContentPieces(Array.isArray(cnt) ? cnt : []);
+    setProjectInsights((Array.isArray(ins) ? ins : []).filter((i: any) => i.project_id === id));
+  }, [id]);
 
   // Open edit modal -- populate form with current project data
   const openEditModal = () => {
@@ -182,7 +206,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         const updated = await res.json();
         setProject(updated);
         setShowEditProject(false);
+      } else {
+        setError("Failed to update project");
       }
+    } catch {
+      setError("Failed to update project");
     } finally {
       setSavingProject(false);
     }
@@ -194,7 +222,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
       if (res.ok) {
         router.push("/projects");
+      } else {
+        setError("Failed to delete project");
       }
+    } catch {
+      setError("Failed to delete project");
     } finally {
       setDeletingProject(false);
     }
@@ -211,9 +243,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         body: JSON.stringify({ project_id: id, input: execInput }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        setError("Skill execution failed");
+      }
       setExecResult(data.output || data.error || JSON.stringify(data));
     } catch {
       setExecResult("Execution failed");
+      setError("Skill execution failed");
     } finally {
       setExecRunning(false);
     }
@@ -315,7 +351,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         p.description ? `Description: ${p.description}` : "",
       ].filter(Boolean).join("\n"),
     },
-    "market-monitoring": {
+    "market-research": {
       skillId: "skill-market-research",
       buildInput: (p) => [
         `Conduct comprehensive market research for: ${p.niche || p.name}`,
@@ -324,16 +360,42 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         "Focus on: current market trends, emerging competitors, underserved segments, and actionable opportunities.",
       ].filter(Boolean).join("\n"),
     },
+    "outbound-sequence": {
+      skillId: "skill-outbound-sequence",
+      buildInput: (p) => [
+        `Build an outbound sequence for: ${p.name}`,
+        p.niche ? `Niche: ${p.niche}` : "",
+        p.target_audience ? `Target audience: ${p.target_audience}` : "",
+        p.description ? `Offer: ${p.description}` : "",
+      ].filter(Boolean).join("\n"),
+    },
+    "content-strategy": {
+      skillId: "skill-content-engine",
+      buildInput: (p) => [
+        `Create a multi-platform content strategy for: ${p.name}`,
+        p.niche ? `Niche: ${p.niche}` : "",
+        p.target_audience ? `Target audience: ${p.target_audience}` : "",
+        p.description ? `About: ${p.description}` : "",
+        "Produce a blog post, Twitter/X thread, LinkedIn post, and newsletter edition.",
+      ].filter(Boolean).join("\n"),
+    },
   };
 
   const actionTitles: Record<string, (p: Project) => string> = {
     "competitive-analysis": (p) => `Competitive Analysis: ${p.niche || p.name}`,
     "landing-page": (p) => `Landing Page Draft: ${p.name}`,
-    "market-monitoring": (p) => `Market Research: ${p.niche || p.name}`,
+    "market-research": (p) => `Market Research: ${p.niche || p.name}`,
+    "outbound-sequence": (p) => `Outbound Sequence: ${p.name}`,
+    "content-strategy": (p) => `Content Strategy: ${p.name}`,
   };
 
   const handleRunAction = async (actionId: string) => {
     if (!project) return;
+
+    if (actionId === "define-niche" || actionId === "define-offer") {
+      openEditModal();
+      return;
+    }
 
     if (actionId === "add-contacts") {
       setContactForm({ name: "", email: "", company: "", role: "", notes: "" });
@@ -395,55 +457,66 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     setSavingResult(true);
 
     try {
-      if (actionResult.actionId === "competitive-analysis") {
-        await fetch("/api/insights", {
+      const results: Response[] = [];
+
+      // Map action types to save targets
+      const saveAsInsight = ["competitive-analysis", "market-research"];
+      const saveAsContent: Record<string, string> = {
+        "landing-page": "landing_page",
+        "outbound-sequence": "email",
+        "content-strategy": "post",
+      };
+
+      if (saveAsInsight.includes(actionResult.actionId)) {
+        const res = await fetch("/api/insights", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             title: actionResult.title,
             description: actionResult.output,
             source: actionResult.skillName,
-            category: "competitive_analysis",
+            category: actionResult.actionId === "competitive-analysis" ? "competitive_analysis" : "market_research",
             project_id: id,
           }),
         });
-      } else if (actionResult.actionId === "landing-page") {
-        await fetch("/api/content", {
+        results.push(res);
+        if (actionResult.actionId === "market-research") {
+          const res2 = await fetch("/api/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: id,
+              title: "Review market changes and update analysis",
+              description: `Re-run market research for "${project.niche || project.name}" to track shifts in the competitive landscape.`,
+            }),
+          });
+          results.push(res2);
+          fetchTasks();
+        }
+      } else if (saveAsContent[actionResult.actionId]) {
+        const res = await fetch("/api/content", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            type: "landing_page",
+            type: saveAsContent[actionResult.actionId],
             title: actionResult.title,
             content: actionResult.output,
             project_id: id,
           }),
         });
-      } else if (actionResult.actionId === "market-monitoring") {
-        await fetch("/api/insights", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: actionResult.title,
-            description: actionResult.output,
-            source: actionResult.skillName,
-            category: "market_research",
-            project_id: id,
-          }),
-        });
-        await fetch("/api/tasks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            project_id: id,
-            title: "Review market changes and update analysis",
-            description: `Re-run market research for "${project.niche || project.name}" to track shifts in the competitive landscape, new entrants, and emerging trends.`,
-          }),
-        });
-        fetchTasks();
+        results.push(res);
       }
 
-      setResultSaved(true);
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length > 0) {
+        setError("Failed to save some results. Please try again.");
+      } else {
+        setResultSaved(true);
+      }
       fetchActivity();
+      refreshStepData();
+    } catch {
+      setError("Failed to save action result");
     } finally {
       setSavingResult(false);
     }
@@ -469,7 +542,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         setContactForm({ name: "", email: "", company: "", role: "", notes: "" });
         setShowAddContact(false);
         fetchActivity();
+        refreshStepData();
+      } else {
+        setError("Failed to add contact");
       }
+    } catch {
+      setError("Failed to add contact");
     } finally {
       setCreatingContact(false);
     }
@@ -513,10 +591,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
   const railStatus = [
     { name: "Agent Harness", key: "agent_harness", color: "bg-amber-400", active: skills.length > 0 },
-    { name: "Search Layer", key: "search", color: "bg-blue-400", active: true },
-    { name: "Ops Brain", key: "ops_brain", color: "bg-emerald-400", active: true },
-    { name: "Outbound Spine", key: "outbound", color: "bg-violet-400", active: false },
-    { name: "Audience Rail", key: "audience", color: "bg-rose-400", active: false },
+    { name: "Search Layer", key: "search", color: "bg-blue-400", active: projectInsights.length > 0 },
+    { name: "Ops Brain", key: "ops_brain", color: "bg-emerald-400", active: tasks.length > 0 },
+    { name: "Outbound Spine", key: "outbound", color: "bg-violet-400", active: contacts.length > 0 },
+    { name: "Audience Rail", key: "audience", color: "bg-rose-400", active: contentPieces.length > 0 },
   ];
 
   const completedCount = tasks.filter((t) => t.status === "completed").length;
@@ -534,6 +612,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         </svg>
         Back to Projects
       </button>
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 flex items-center justify-between">
+          <span className="text-sm text-red-400">{error}</span>
+          <button onClick={() => setError("")} className="text-red-400 hover:text-red-300 cursor-pointer text-sm">&#x2715;</button>
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex items-start justify-between">
@@ -645,7 +730,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               <h2 className="text-sm font-semibold text-[#94a3b8] uppercase tracking-wider mb-3">
                 Quick Stats
               </h2>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-3 gap-4 sm:grid-cols-6">
                 <Card hover={false}>
                   <div className="text-xs text-[#64748b] mb-1">Tasks</div>
                   <div className="text-2xl font-bold text-[#e2e8f0]">{tasks.length}</div>
@@ -660,87 +745,207 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   <div className="text-2xl font-bold text-[#e2e8f0]">{activity.length}</div>
                 </Card>
                 <Card hover={false}>
-                  <div className="text-xs text-[#64748b] mb-1">Available Skills</div>
+                  <div className="text-xs text-[#64748b] mb-1">Skills</div>
                   <div className="text-2xl font-bold text-[#e2e8f0]">{skills.length}</div>
                 </Card>
                 <Card hover={false}>
-                  <div className="text-xs text-[#64748b] mb-1">Created</div>
-                  <div className="text-sm font-medium text-[#e2e8f0]">
-                    {new Date(project.created_at).toLocaleDateString()}
-                  </div>
+                  <div className="text-xs text-[#64748b] mb-1">Contacts</div>
+                  <div className="text-2xl font-bold text-[#e2e8f0]">{contacts.length}</div>
+                </Card>
+                <Card hover={false}>
+                  <div className="text-xs text-[#64748b] mb-1">Content</div>
+                  <div className="text-2xl font-bold text-[#e2e8f0]">{contentPieces.length}</div>
+                </Card>
+                <Card hover={false}>
+                  <div className="text-xs text-[#64748b] mb-1">Insights</div>
+                  <div className="text-2xl font-bold text-[#e2e8f0]">{projectInsights.length}</div>
                 </Card>
               </div>
             </div>
 
-            {/* Recommended Actions */}
-            <div>
-              <h2 className="text-sm font-semibold text-[#94a3b8] uppercase tracking-wider mb-3">
-                Recommended Actions
-              </h2>
-              <div className="space-y-2">
-                {([
-                  {
-                    id: "competitive-analysis",
-                    label: "Run competitive analysis to validate your niche",
-                    desc: "Analyzes competitors, positioning, and market opportunities",
-                    badge: "Search",
-                    badgeVariant: "info" as const,
-                  },
-                  {
-                    id: "add-contacts",
-                    label: "Add target contacts for outbound outreach",
-                    desc: "Create contacts to begin outreach for this project",
-                    badge: "Outbound",
-                    badgeVariant: "default" as const,
-                  },
-                  {
-                    id: "landing-page",
-                    label: "Generate a landing page draft",
-                    desc: "Creates a high-converting sales page with proven copy frameworks",
-                    badge: "Agent",
-                    badgeVariant: "warning" as const,
-                  },
-                  {
-                    id: "market-monitoring",
-                    label: "Set up automated market monitoring",
-                    desc: "Researches market trends and creates a recurring review task",
-                    badge: "Search",
-                    badgeVariant: "info" as const,
-                  },
-                ] as const).map((action) => {
-                  const isRunning = runningAction === action.id;
-                  return (
-                    <button
-                      key={action.id}
-                      onClick={() => handleRunAction(action.id)}
-                      disabled={!!runningAction}
-                      className={`w-full text-left cursor-pointer rounded-lg border border-[#1e293b] bg-[#141822] p-3 flex items-center gap-3 transition-all ${
-                        isRunning
-                          ? "opacity-80 border-amber-500/30"
-                          : runningAction
-                          ? "opacity-50 cursor-not-allowed"
-                          : "hover:border-amber-500/40 hover:bg-[#1a1f2e]"
-                      }`}
-                    >
-                      <div className="text-amber-500 shrink-0">
-                        {isRunning ? (
-                          <div className="w-[14px] h-[14px] animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
-                        ) : (
-                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                            <path d="M3 7h8M8 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-sm text-[#e2e8f0]">{action.label}</span>
-                        <p className="text-[10px] text-[#64748b] mt-0.5">{action.desc}</p>
-                      </div>
-                      <Badge variant={action.badgeVariant}>{action.badge}</Badge>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            {/* Guided Action Plan */}
+            {(() => {
+              const hasNiche = !!(project.niche && project.niche.trim());
+              const hasAudience = !!(project.target_audience && project.target_audience.trim());
+              const hasDescription = !!(project.description && project.description.trim().length > 20);
+              const hasMarketResearch = activity.some((a) => a.skill_used === "Market Research Agent");
+              const hasCompetitiveAnalysis = activity.some((a) => a.skill_used === "Competitive Intel Scout");
+              const hasLandingPage = contentPieces.some((c) => c.type === "landing_page");
+              const hasContacts = contacts.length > 0;
+              const hasOutboundSequence = activity.some((a) => a.skill_used === "Outbound Sequence Builder");
+              const hasContentStrategy = activity.some((a) => a.skill_used === "Content Engine");
+
+              const steps = [
+                {
+                  id: "define-niche",
+                  label: "Define your niche and target audience",
+                  desc: hasNiche && hasAudience
+                    ? `${project.niche} \u2014 ${project.target_audience}`
+                    : "Set who you're building for so every other step is targeted",
+                  badge: "Setup",
+                  badgeVariant: "default" as const,
+                  completed: hasNiche && hasAudience,
+                  available: true,
+                },
+                {
+                  id: "market-research",
+                  label: "Research your market",
+                  desc: "Analyze market size, trends, audience pain points, and opportunities",
+                  badge: "Search",
+                  badgeVariant: "info" as const,
+                  completed: hasMarketResearch,
+                  available: hasNiche,
+                },
+                {
+                  id: "competitive-analysis",
+                  label: "Analyze your competitors",
+                  desc: "Map the competitive landscape and find positioning gaps",
+                  badge: "Search",
+                  badgeVariant: "info" as const,
+                  completed: hasCompetitiveAnalysis,
+                  available: hasNiche,
+                },
+                {
+                  id: "define-offer",
+                  label: "Define your offer and positioning",
+                  desc: hasDescription
+                    ? project.description.slice(0, 80) + (project.description.length > 80 ? "..." : "")
+                    : "Craft your value proposition based on the research",
+                  badge: "Setup",
+                  badgeVariant: "default" as const,
+                  completed: hasDescription,
+                  available: hasNiche,
+                },
+                {
+                  id: "landing-page",
+                  label: "Generate a landing page",
+                  desc: "Create a high-converting sales page with proven copy frameworks",
+                  badge: "Agent",
+                  badgeVariant: "warning" as const,
+                  completed: hasLandingPage,
+                  available: hasNiche && hasDescription,
+                },
+                {
+                  id: "add-contacts",
+                  label: "Add target contacts",
+                  desc: "Build your outreach list with prospective customers",
+                  badge: "Outbound",
+                  badgeVariant: "default" as const,
+                  completed: hasContacts,
+                  available: hasNiche,
+                },
+                {
+                  id: "outbound-sequence",
+                  label: "Build outbound sequence",
+                  desc: "Create a multi-channel outreach campaign for your contacts",
+                  badge: "Outbound",
+                  badgeVariant: "default" as const,
+                  completed: hasOutboundSequence,
+                  available: hasContacts,
+                },
+                {
+                  id: "content-strategy",
+                  label: "Create content strategy",
+                  desc: "Generate blog posts, social threads, and newsletter content",
+                  badge: "Audience",
+                  badgeVariant: "rose" as const,
+                  completed: hasContentStrategy,
+                  available: hasNiche && hasAudience,
+                },
+              ];
+
+              const completedSteps = steps.filter((s) => s.completed).length;
+              const nextStep = steps.find((s) => !s.completed && s.available);
+
+              return (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-sm font-semibold text-[#94a3b8] uppercase tracking-wider">
+                      Action Plan
+                    </h2>
+                    <span className="text-[10px] text-[#64748b]">
+                      {completedSteps}/{steps.length} completed
+                    </span>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="w-full h-1 bg-[#1e293b] rounded-full mb-4 overflow-hidden">
+                    <div
+                      className="h-full bg-amber-500 rounded-full transition-all duration-500"
+                      style={{ width: `${(completedSteps / steps.length) * 100}%` }}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    {steps.map((step, idx) => {
+                      const isNext = nextStep?.id === step.id;
+                      const isRunning = runningAction === step.id;
+                      const isLocked = !step.available && !step.completed;
+
+                      return (
+                        <button
+                          key={step.id}
+                          onClick={() => !isLocked && handleRunAction(step.id)}
+                          disabled={isLocked || !!runningAction}
+                          className={`w-full text-left rounded-lg border p-3 flex items-center gap-3 transition-all ${
+                            step.completed
+                              ? "border-emerald-500/20 bg-emerald-500/5 opacity-70"
+                              : isNext
+                              ? "border-amber-500/40 bg-amber-500/5 cursor-pointer hover:bg-amber-500/10"
+                              : isLocked
+                              ? "border-[#1e293b] bg-[#141822] opacity-40 cursor-not-allowed"
+                              : "border-[#1e293b] bg-[#141822] cursor-pointer hover:border-[#334155] hover:bg-[#1a1f2e]"
+                          } ${isRunning ? "border-amber-500/30 animate-pulse" : ""}`}
+                        >
+                          {/* Step indicator */}
+                          <div className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold">
+                            {isRunning ? (
+                              <div className="w-4 h-4 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
+                            ) : step.completed ? (
+                              <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                  <path d="M2.5 6l2.5 2.5 4.5-5" stroke="#10b981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              </div>
+                            ) : isLocked ? (
+                              <div className="w-6 h-6 rounded-full bg-[#1e293b] flex items-center justify-center">
+                                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                  <rect x="2.5" y="4.5" width="5" height="4" rx="0.5" stroke="#64748b" strokeWidth="1" />
+                                  <path d="M3.5 4.5V3a1.5 1.5 0 013 0v1.5" stroke="#64748b" strokeWidth="1" />
+                                </svg>
+                              </div>
+                            ) : (
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                                isNext ? "bg-amber-500/20 text-amber-400" : "bg-[#1e293b] text-[#64748b]"
+                              }`}>
+                                {idx + 1}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <span className={`text-sm ${
+                              step.completed ? "text-emerald-400 line-through" : isNext ? "text-[#e2e8f0] font-medium" : "text-[#e2e8f0]"
+                            }`}>
+                              {step.label}
+                            </span>
+                            <p className="text-[10px] text-[#64748b] mt-0.5 truncate">
+                              {isLocked ? "Complete earlier steps first" : step.desc}
+                            </p>
+                          </div>
+
+                          {/* Badge */}
+                          <div className="shrink-0">
+                            <Badge variant={step.badgeVariant}>{step.badge}</Badge>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1124,8 +1329,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                       </>
                     ) : actionResult.actionId === "landing-page" ? (
                       "Save as Landing Page"
-                    ) : actionResult.actionId === "market-monitoring" ? (
+                    ) : actionResult.actionId === "market-research" ? (
                       "Save Insight & Create Task"
+                    ) : actionResult.actionId === "outbound-sequence" ? (
+                      "Save Outbound Sequence"
+                    ) : actionResult.actionId === "content-strategy" ? (
+                      "Save Content Strategy"
                     ) : (
                       "Save as Insight"
                     )}

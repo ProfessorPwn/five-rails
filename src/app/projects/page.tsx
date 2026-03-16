@@ -28,6 +28,7 @@ export default function ProjectsPage() {
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [error, setError] = useState("");
   const [form, setForm] = useState({
     name: "",
     description: "",
@@ -63,7 +64,11 @@ export default function ProjectsPage() {
         setForm({ name: "", description: "", niche: "", target_audience: "" });
         setShowCreate(false);
         fetchProjects();
+      } else {
+        setError("Failed to create project");
       }
+    } catch {
+      setError("Failed to create project");
     } finally {
       setCreating(false);
     }
@@ -72,10 +77,11 @@ export default function ProjectsPage() {
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this project?")) return;
     try {
-      await fetch(`/api/projects/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+      if (!res.ok) setError("Failed to delete project");
       fetchProjects();
     } catch {
-      // ignore
+      setError("Failed to delete project");
     }
   };
 
@@ -118,6 +124,13 @@ export default function ProjectsPage() {
           New Project
         </Button>
       </div>
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 flex items-center justify-between">
+          <span className="text-sm text-red-400">{error}</span>
+          <button onClick={() => setError("")} className="text-red-400 hover:text-red-300 cursor-pointer text-sm">&#x2715;</button>
+        </div>
+      )}
 
       {/* Filters */}
       {projects.length > 0 && (

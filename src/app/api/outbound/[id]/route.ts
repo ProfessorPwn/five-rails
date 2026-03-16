@@ -34,7 +34,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    deleteContact(id);
+    const deleted = deleteContact(id);
+    if (!deleted) {
+      return NextResponse.json(
+        { error: "Contact not found" },
+        { status: 404 }
+      );
+    }
     logActivity({
       action: "contact_deleted",
       details: `Deleted contact: ${id}`,

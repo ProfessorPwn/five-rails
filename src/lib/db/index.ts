@@ -483,6 +483,7 @@ export function updateContent(id: string, data: Partial<{
   platform: string;
   status: ContentPiece['status'];
   scheduled_at: string;
+  project_id: string;
 }>): ContentPiece | undefined {
   const existing = getDb().prepare('SELECT * FROM content_pieces WHERE id = ?').get(id) as ContentPiece | undefined;
   if (!existing) return undefined;
@@ -496,6 +497,7 @@ export function updateContent(id: string, data: Partial<{
   if (data.platform !== undefined) { fields.push('platform = ?'); values.push(data.platform); }
   if (data.status !== undefined) { fields.push('status = ?'); values.push(data.status); }
   if (data.scheduled_at !== undefined) { fields.push('scheduled_at = ?'); values.push(data.scheduled_at); }
+  if (data.project_id !== undefined) { fields.push('project_id = ?'); values.push(data.project_id); }
 
   if (fields.length === 0) return existing;
 

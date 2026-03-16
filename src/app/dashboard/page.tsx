@@ -14,6 +14,7 @@ interface RailData {
   borderColor: string;
   count: number;
   label: string;
+  href: string;
 }
 
 interface Project {
@@ -82,6 +83,7 @@ export default function DashboardPage() {
       borderColor: "border-amber-500/20",
       count: skills.length,
       label: "active skills",
+      href: "/skills",
     },
     {
       name: "Search Layer",
@@ -99,6 +101,7 @@ export default function DashboardPage() {
       borderColor: "border-blue-500/20",
       count: insights.length,
       label: "insights",
+      href: "/browse",
     },
     {
       name: "Ops Brain",
@@ -115,6 +118,7 @@ export default function DashboardPage() {
       borderColor: "border-emerald-500/20",
       count: projects.reduce((acc, p) => acc + (p.status === "active" ? 1 : 0), 0),
       label: "active projects",
+      href: "/projects",
     },
     {
       name: "Outbound Spine",
@@ -132,6 +136,7 @@ export default function DashboardPage() {
       borderColor: "border-violet-500/20",
       count: contacts.length,
       label: "contacts",
+      href: "/outbound",
     },
     {
       name: "Audience Rail",
@@ -148,6 +153,7 @@ export default function DashboardPage() {
       borderColor: "border-rose-500/20",
       count: content.length,
       label: "content pieces",
+      href: "/audience",
     },
   ];
 
@@ -195,7 +201,7 @@ export default function DashboardPage() {
       {/* Five Rails */}
       <div className="grid grid-cols-5 gap-4">
         {rails.map((rail) => (
-          <Card key={rail.name} className={`${rail.borderColor} border`} hover>
+          <Card key={rail.name} className={`${rail.borderColor} border`} hover onClick={() => router.push(rail.href)}>
             <div className={`${rail.color} mb-3`}>{rail.icon}</div>
             <h3 className="text-sm font-semibold text-[#e2e8f0] mb-1">{rail.name}</h3>
             <p className="text-xs text-[#64748b] mb-3">{rail.description}</p>

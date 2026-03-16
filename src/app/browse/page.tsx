@@ -36,6 +36,7 @@ export default function BrowsePage() {
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("score");
+  const [error, setError] = useState("");
   const [attachingId, setAttachingId] = useState<string | null>(null);
   const [attachProject, setAttachProject] = useState("");
   const [editingInsight, setEditingInsight] = useState<Insight | null>(null);
@@ -75,6 +76,8 @@ export default function BrowsePage() {
 
   const categories = [...new Set(insights.map((i) => i.category).filter(Boolean))];
 
+  const projectMap = new Map(projects.map((p) => [p.id, p.name]));
+
   const filtered = insights
     .filter((i) => {
       if (filterCategory !== "all" && i.category !== filterCategory) return false;
@@ -108,7 +111,11 @@ export default function BrowsePage() {
         setForm({ title: "", description: "", pain_point: "", source: "", category: "market", score: 50 });
         setShowCreate(false);
         fetchData();
+      } else {
+        setError("Failed to create insight");
       }
+    } catch {
+      setError("Failed to create insight");
     } finally {
       setCreating(false);
     }
@@ -139,7 +146,11 @@ export default function BrowsePage() {
       if (res.ok) {
         setEditingInsight(null);
         fetchData();
+      } else {
+        setError("Failed to update insight");
       }
+    } catch {
+      setError("Failed to update insight");
     } finally {
       setEditSaving(false);
     }
@@ -148,26 +159,28 @@ export default function BrowsePage() {
   const handleDeleteInsight = async (id: string) => {
     if (!confirm("Delete this insight?")) return;
     try {
-      await fetch(`/api/insights/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/insights/${id}`, { method: "DELETE" });
+      if (!res.ok) setError("Failed to delete insight");
       fetchData();
     } catch {
-      // ignore
+      setError("Failed to delete insight");
     }
   };
 
   const handleAttach = async (insightId: string) => {
     if (!attachProject) return;
     try {
-      await fetch(`/api/insights/${insightId}/attach`, {
+      const res = await fetch(`/api/insights/${insightId}/attach`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: attachProject }),
       });
+      if (!res.ok) setError("Failed to attach insight to project");
       setAttachingId(null);
       setAttachProject("");
       fetchData();
     } catch {
-      // ignore
+      setError("Failed to attach insight to project");
     }
   };
 
@@ -194,6 +207,13 @@ export default function BrowsePage() {
           Add Insight
         </Button>
       </div>
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 flex items-center justify-between">
+          <span className="text-sm text-red-400">{error}</span>
+          <button onClick={() => setError("")} className="text-red-400 hover:text-red-300 cursor-pointer text-sm">&#x2715;</button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex items-center gap-3">
@@ -276,6 +296,16 @@ export default function BrowsePage() {
                   <p className="text-xs text-[#e2e8f0] mt-0.5">{insight.pain_point}</p>
                 </div>
               )}
+              {insight.project_id && projectMap.get(insight.project_id) && (
+                <div className="mb-2">
+                  <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+                    <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
+                      <path d="M3 7h8M5.5 3.5L3 7l2.5 3.5M8.5 3.5L11 7l-2.5 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    {projectMap.get(insight.project_id)}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between pt-2 border-t border-[#1e293b]">
                 <div className="flex items-center gap-2">
                   {insight.category && <Badge variant="info">{insight.category}</Badge>}
@@ -326,7 +356,7 @@ export default function BrowsePage() {
                       onClick={() => setAttachingId(insight.id)}
                       className="!text-[10px]"
                     >
-                      Attach
+                      {insight.project_id ? "Reassign" : "Attach"}
                     </Button>
                   )}
                   <button

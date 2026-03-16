@@ -8,11 +8,7 @@ const VALID_CONTENT_TYPES = new Set(["post", "email", "script", "lead_magnet", "
 
 export function sanitize(input: unknown): string {
   if (typeof input !== "string") return String(input ?? "");
-  return input
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#x27;");
+  return input.replace(/<script[\s>][\s\S]*?<\/script>/gi, "").replace(/<\/?[^>]+(>|$)/g, "");
 }
 
 export async function safeParseJson(

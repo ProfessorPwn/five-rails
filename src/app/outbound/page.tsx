@@ -44,6 +44,7 @@ export default function OutboundPage() {
   const [search, setSearch] = useState("");
   const [filterProject, setFilterProject] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [error, setError] = useState("");
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -91,32 +92,52 @@ export default function OutboundPage() {
         setForm({ name: "", email: "", company: "", role: "", status: "lead", project_id: "" });
         setShowCreate(false);
         fetchData();
+      } else {
+        setError("Failed to create contact");
       }
+    } catch {
+      setError("Failed to create contact");
     } finally {
       setCreating(false);
     }
   };
 
   const handleStatusChange = async (contact: Contact, newStatus: string) => {
+    const previousStatus = contact.status;
+    // Optimistic update
+    setContacts((prev) =>
+      prev.map((c) => (c.id === contact.id ? { ...c, status: newStatus } : c))
+    );
     try {
-      await fetch(`/api/outbound/${contact.id}`, {
+      const res = await fetch(`/api/outbound/${contact.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
-      fetchData();
+      if (!res.ok) {
+        // Revert on failure
+        setContacts((prev) =>
+          prev.map((c) => (c.id === contact.id ? { ...c, status: previousStatus } : c))
+        );
+        setError("Failed to update contact status");
+      }
     } catch {
-      // ignore
+      // Revert on error
+      setContacts((prev) =>
+        prev.map((c) => (c.id === contact.id ? { ...c, status: previousStatus } : c))
+      );
+      setError("Failed to update contact status");
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this contact?")) return;
     try {
-      await fetch(`/api/outbound/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/outbound/${id}`, { method: "DELETE" });
+      if (!res.ok) setError("Failed to delete contact");
       fetchData();
     } catch {
-      // ignore
+      setError("Failed to delete contact");
     }
   };
 
@@ -144,7 +165,11 @@ export default function OutboundPage() {
       if (res.ok) {
         setEditingContact(null);
         fetchData();
+      } else {
+        setError("Failed to update contact");
       }
+    } catch {
+      setError("Failed to update contact");
     } finally {
       setEditSaving(false);
     }
@@ -194,6 +219,13 @@ export default function OutboundPage() {
           Add Contact
         </Button>
       </div>
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 flex items-center justify-between">
+          <span className="text-sm text-red-400">{error}</span>
+          <button onClick={() => setError("")} className="text-red-400 hover:text-red-300 cursor-pointer text-sm">&#x2715;</button>
+        </div>
+      )}
 
       {/* Pipeline visualization */}
       <div className="grid grid-cols-4 gap-3">

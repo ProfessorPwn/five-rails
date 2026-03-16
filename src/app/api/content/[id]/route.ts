@@ -34,14 +34,20 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    deleteContent(id);
+    const deleted = deleteContent(id);
+    if (!deleted) {
+      return NextResponse.json(
+        { error: "Content not found" },
+        { status: 404 }
+      );
+    }
     logActivity({
       action: "content_deleted",
       details: `Deleted content: ${id}`,
     });
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("DELETE /api/content/[id] error:", error);
+    console.error("DELETE /api/content/[id]:", error);
     return NextResponse.json(
       { error: "Failed to delete content" },
       { status: 500 }

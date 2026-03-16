@@ -23,6 +23,7 @@ export default function ConnectionsPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
   const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
   const [editingConn, setEditingConn] = useState(false);
   const [editConnForm, setEditConnForm] = useState({
@@ -70,7 +71,11 @@ export default function ConnectionsPage() {
         setForm({ provider: "ollama", base_url: "", api_key: "", model: "" });
         setShowCreate(false);
         fetchConnections();
+      } else {
+        setError("Failed to create connection");
       }
+    } catch {
+      setError("Failed to create connection");
     } finally {
       setCreating(false);
     }
@@ -79,24 +84,26 @@ export default function ConnectionsPage() {
   const handleToggle = async (conn: Connection) => {
     const newActive = conn.is_active ? false : true;
     try {
-      await fetch(`/api/connections/${conn.id}`, {
+      const res = await fetch(`/api/connections/${conn.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_active: newActive }),
       });
+      if (!res.ok) setError("Failed to toggle connection");
       fetchConnections();
     } catch {
-      // ignore
+      setError("Failed to toggle connection");
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this connection?")) return;
     try {
-      await fetch(`/api/connections/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/connections/${id}`, { method: "DELETE" });
+      if (!res.ok) setError("Failed to delete connection");
       fetchConnections();
     } catch {
-      // ignore
+      setError("Failed to delete connection");
     }
   };
 
@@ -129,7 +136,11 @@ export default function ConnectionsPage() {
       if (res.ok) {
         setEditingConnection(null);
         fetchConnections();
+      } else {
+        setError("Failed to update connection");
       }
+    } catch {
+      setError("Failed to update connection");
     } finally {
       setEditingConn(false);
     }
@@ -196,6 +207,13 @@ export default function ConnectionsPage() {
           Add Connection
         </Button>
       </div>
+
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 flex items-center justify-between">
+          <span className="text-sm text-red-400">{error}</span>
+          <button onClick={() => setError("")} className="text-red-400 hover:text-red-300 cursor-pointer text-sm">&#x2715;</button>
+        </div>
+      )}
 
       {/* List */}
       {connections.length === 0 ? (

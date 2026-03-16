@@ -30,8 +30,8 @@ export async function POST(request: NextRequest) {
     if (!raw) return NextResponse.json({ error: "Invalid or missing JSON body" }, { status: 400 });
     const err = validateRequired(raw, ["name"]);
     if (err) return NextResponse.json({ error: err }, { status: 400 });
-    if (raw.email && !isValidEmail(raw.email)) {
-      return NextResponse.json({ error: "invalid email format" }, { status: 400 });
+    if (raw.email && typeof raw.email === "string" && !isValidEmail(raw.email)) {
+      return NextResponse.json({ error: "Invalid email format" }, { status: 400 });
     }
     const body = sanitizeBody(raw, ["notes"]);
     if (body.project_id === "") body.project_id = undefined;

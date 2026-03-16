@@ -38,6 +38,16 @@ export default function BrowsePage() {
   const [sortBy, setSortBy] = useState<SortKey>("score");
   const [attachingId, setAttachingId] = useState<string | null>(null);
   const [attachProject, setAttachProject] = useState("");
+  const [editingInsight, setEditingInsight] = useState<Insight | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editForm, setEditForm] = useState({
+    title: "",
+    description: "",
+    pain_point: "",
+    source: "",
+    category: "market",
+    score: 50,
+  });
 
   const [form, setForm] = useState({
     title: "",
@@ -50,8 +60,8 @@ export default function BrowsePage() {
 
   const fetchData = () => {
     Promise.all([
-      fetch("/api/insights").then((r) => r.json()).catch(() => []),
-      fetch("/api/projects").then((r) => r.json()).catch(() => []),
+      fetch("/api/insights").then((r) => r.ok ? r.json() : []).catch(() => []),
+      fetch("/api/projects").then((r) => r.ok ? r.json() : []).catch(() => []),
     ]).then(([ins, proj]) => {
       setInsights(Array.isArray(ins) ? ins : []);
       setProjects(Array.isArray(proj) ? proj : []);
@@ -73,7 +83,8 @@ export default function BrowsePage() {
         return (
           i.title?.toLowerCase().includes(q) ||
           i.description?.toLowerCase().includes(q) ||
-          i.pain_point?.toLowerCase().includes(q)
+          i.pain_point?.toLowerCase().includes(q) ||
+          i.source?.toLowerCase().includes(q)
         );
       }
       return true;
@@ -100,6 +111,47 @@ export default function BrowsePage() {
       }
     } finally {
       setCreating(false);
+    }
+  };
+
+  const openEditInsight = (insight: Insight) => {
+    setEditingInsight(insight);
+    setEditForm({
+      title: insight.title || "",
+      description: insight.description || "",
+      pain_point: insight.pain_point || "",
+      source: insight.source || "",
+      category: insight.category || "market",
+      score: insight.score || 50,
+    });
+  };
+
+  const handleEditInsight = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingInsight || !editForm.title.trim()) return;
+    setEditSaving(true);
+    try {
+      const res = await fetch(`/api/insights/${editingInsight.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      });
+      if (res.ok) {
+        setEditingInsight(null);
+        fetchData();
+      }
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDeleteInsight = async (id: string) => {
+    if (!confirm("Delete this insight?")) return;
+    try {
+      await fetch(`/api/insights/${id}`, { method: "DELETE" });
+      fetchData();
+    } catch {
+      // ignore
     }
   };
 
@@ -199,7 +251,10 @@ export default function BrowsePage() {
           {filtered.map((insight) => (
             <Card key={insight.id}>
               <div className="flex items-start justify-between mb-2">
-                <h3 className="text-sm font-semibold text-[#e2e8f0] pr-2 line-clamp-2">
+                <h3
+                  className="text-sm font-semibold text-[#e2e8f0] pr-2 line-clamp-2 cursor-pointer hover:text-amber-400 transition-colors"
+                  onClick={() => openEditInsight(insight)}
+                >
                   {insight.title}
                 </h3>
                 {insight.score > 0 && (
@@ -228,7 +283,7 @@ export default function BrowsePage() {
                     <span className="text-[10px] text-[#64748b]">{insight.source}</span>
                   )}
                 </div>
-                <div className="relative">
+                <div className="flex items-center gap-1">
                   {attachingId === insight.id ? (
                     <div className="flex items-center gap-1">
                       <select
@@ -274,6 +329,14 @@ export default function BrowsePage() {
                       Attach
                     </Button>
                   )}
+                  <button
+                    onClick={() => handleDeleteInsight(insight.id)}
+                    className="text-[#64748b] hover:text-red-400 transition-colors cursor-pointer ml-1"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                      <path d="M3 3.5h8M5.5 3.5V2.5a1 1 0 011-1h1a1 1 0 011 1v1M4 3.5l.5 8a1 1 0 001 1h3a1 1 0 001-1l.5-8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                    </svg>
+                  </button>
                 </div>
               </div>
             </Card>
@@ -342,6 +405,72 @@ export default function BrowsePage() {
             </Button>
             <Button type="submit" disabled={creating || !form.title.trim()}>
               {creating ? "Adding..." : "Add Insight"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal open={!!editingInsight} onClose={() => setEditingInsight(null)} title="Edit Insight">
+        <form onSubmit={handleEditInsight} className="space-y-4">
+          <Input
+            label="Title"
+            placeholder="What did you find?"
+            value={editForm.title}
+            onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+            required
+          />
+          <Textarea
+            label="Description"
+            placeholder="Details about this insight..."
+            value={editForm.description}
+            onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+          />
+          <Input
+            label="Pain Point"
+            placeholder="What problem does this address?"
+            value={editForm.pain_point}
+            onChange={(e) => setEditForm({ ...editForm, pain_point: e.target.value })}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Source"
+              placeholder="e.g. Reddit, Twitter, Manual"
+              value={editForm.source}
+              onChange={(e) => setEditForm({ ...editForm, source: e.target.value })}
+            />
+            <Select
+              label="Category"
+              value={editForm.category}
+              onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+              options={[
+                { value: "market", label: "Market" },
+                { value: "competitor", label: "Competitor" },
+                { value: "trend", label: "Trend" },
+                { value: "pain_point", label: "Pain Point" },
+                { value: "opportunity", label: "Opportunity" },
+              ]}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-[#94a3b8] mb-1.5">
+              Score: {editForm.score}
+            </label>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={editForm.score}
+              onChange={(e) => setEditForm({ ...editForm, score: parseInt(e.target.value) })}
+              className="w-full accent-amber-500"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" type="button" onClick={() => setEditingInsight(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={editSaving || !editForm.title.trim()}>
+              {editSaving ? "Saving..." : "Save Changes"}
             </Button>
           </div>
         </form>

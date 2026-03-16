@@ -17,7 +17,7 @@ export function sanitize(input: unknown): string {
 
 export async function safeParseJson(
   request: NextRequest
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<string, any> | null> {
   try {
     const text = await request.text();
     if (!text || !text.trim()) return null;
@@ -50,10 +50,10 @@ export function validateRequired(
   return null;
 }
 
-export function sanitizeBody<T extends Record<string, unknown>>(
-  body: T,
+export function sanitizeBody(
+  body: Record<string, any>,
   textFields: string[] = []
-): T {
+): any {
   const cleaned = { ...body };
   for (const [key, value] of Object.entries(cleaned)) {
     if (typeof value === "string") {

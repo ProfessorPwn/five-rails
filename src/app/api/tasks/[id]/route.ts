@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { updateContent, deleteContent, logActivity } from "@/lib/db";
+import { updateTask, deleteTask, logActivity } from "@/lib/db";
 import { safeParseJson } from "@/lib/validation";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -9,23 +9,23 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const { id } = await context.params;
     const body = await safeParseJson(request);
     if (!body) return NextResponse.json({ error: "Invalid or missing JSON body" }, { status: 400 });
-    const content = await updateContent(id, body);
-    if (!content) {
+    const task = await updateTask(id, body);
+    if (!task) {
       return NextResponse.json(
-        { error: "Content not found" },
+        { error: "Task not found" },
         { status: 404 }
       );
     }
     await logActivity({
-      action: "content_updated",
-      project_id: content.project_id || undefined,
-      details: `Updated content: ${content.title || id}`,
+      action: "task_updated",
+      project_id: task.project_id,
+      details: `Updated task: ${task.title || id}`,
     });
-    return NextResponse.json(content);
+    return NextResponse.json(task);
   } catch (error) {
-    console.error("PATCH /api/content/[id] error:", error);
+    console.error("PATCH /api/tasks/[id] error:", error);
     return NextResponse.json(
-      { error: "Failed to update content" },
+      { error: "Failed to update task" },
       { status: 500 }
     );
   }
@@ -34,16 +34,22 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    deleteContent(id);
-    logActivity({
-      action: "content_deleted",
-      details: `Deleted content: ${id}`,
+    const deleted = await deleteTask(id);
+    if (!deleted) {
+      return NextResponse.json(
+        { error: "Task not found" },
+        { status: 404 }
+      );
+    }
+    await logActivity({
+      action: "task_deleted",
+      details: `Deleted task: ${id}`,
     });
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("DELETE /api/content/[id] error:", error);
+    console.error("DELETE /api/tasks/[id] error:", error);
     return NextResponse.json(
-      { error: "Failed to delete content" },
+      { error: "Failed to delete task" },
       { status: 500 }
     );
   }

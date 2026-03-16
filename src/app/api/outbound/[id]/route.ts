@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { updateContact, logActivity } from "@/lib/db";
+import { updateContact, deleteContact, logActivity } from "@/lib/db";
 import { safeParseJson } from "@/lib/validation";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -26,6 +26,24 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     console.error("PATCH /api/outbound/[id] error:", error);
     return NextResponse.json(
       { error: "Failed to update contact" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest, context: RouteContext) {
+  try {
+    const { id } = await context.params;
+    deleteContact(id);
+    logActivity({
+      action: "contact_deleted",
+      details: `Deleted contact: ${id}`,
+    });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("DELETE /api/outbound/[id] error:", error);
+    return NextResponse.json(
+      { error: "Failed to delete contact" },
       { status: 500 }
     );
   }

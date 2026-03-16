@@ -26,6 +26,8 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
   const [form, setForm] = useState({
     name: "",
     description: "",
@@ -35,7 +37,7 @@ export default function ProjectsPage() {
 
   const fetchProjects = () => {
     fetch("/api/projects")
-      .then((r) => r.json())
+      .then((r) => r.ok ? r.json() : [])
       .then((data) => {
         setProjects(Array.isArray(data) ? data : []);
         setLoading(false);
@@ -67,6 +69,30 @@ export default function ProjectsPage() {
     }
   };
 
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this project?")) return;
+    try {
+      await fetch(`/api/projects/${id}`, { method: "DELETE" });
+      fetchProjects();
+    } catch {
+      // ignore
+    }
+  };
+
+  const filtered = projects.filter((p) => {
+    if (filterStatus !== "all" && p.status !== filterStatus) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        p.name?.toLowerCase().includes(q) ||
+        p.description?.toLowerCase().includes(q) ||
+        p.niche?.toLowerCase().includes(q) ||
+        p.target_audience?.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
@@ -93,8 +119,34 @@ export default function ProjectsPage() {
         </Button>
       </div>
 
+      {/* Filters */}
+      {projects.length > 0 && (
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <input
+              type="text"
+              placeholder="Search projects..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-[#0f1118] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] placeholder-[#64748b] focus:outline-none focus:border-amber-500"
+            />
+          </div>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="bg-[#0f1118] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] focus:outline-none focus:border-amber-500 cursor-pointer"
+          >
+            <option value="all">All Statuses</option>
+            <option value="idea">Idea</option>
+            <option value="active">Active</option>
+            <option value="shipped">Shipped</option>
+            <option value="archived">Archived</option>
+          </select>
+        </div>
+      )}
+
       {/* Grid */}
-      {projects.length === 0 ? (
+      {filtered.length === 0 ? (
         <EmptyState
           icon={
             <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
@@ -102,14 +154,18 @@ export default function ProjectsPage() {
               <path d="M24 16v16M16 24h16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           }
-          title="No projects yet"
-          description="Create your first project to start building your business idea with AI."
-          actionLabel="Create Project"
-          onAction={() => setShowCreate(true)}
+          title={search || filterStatus !== "all" ? "No matching projects" : "No projects yet"}
+          description={
+            search || filterStatus !== "all"
+              ? "Try adjusting your filters."
+              : "Create your first project to start building your business idea with AI."
+          }
+          actionLabel={search || filterStatus !== "all" ? undefined : "Create Project"}
+          onAction={search || filterStatus !== "all" ? undefined : () => setShowCreate(true)}
         />
       ) : (
         <div className="grid grid-cols-3 gap-4">
-          {projects.map((project) => (
+          {filtered.map((project) => (
             <Card key={project.id} onClick={() => router.push(`/projects/${project.id}`)}>
               <div className="flex items-start justify-between mb-3">
                 <h3 className="text-base font-semibold text-[#e2e8f0] truncate pr-2">
@@ -144,6 +200,14 @@ export default function ProjectsPage() {
                 <span className="text-[10px] text-[#64748b] ml-auto">
                   {new Date(project.created_at).toLocaleDateString()}
                 </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }}
+                  className="text-[#64748b] hover:text-red-400 transition-colors cursor-pointer"
+                >
+                  <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                    <path d="M3 3.5h8M5.5 3.5V2.5a1 1 0 011-1h1a1 1 0 011 1v1M4 3.5l.5 8a1 1 0 001 1h3a1 1 0 001-1l.5-8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                  </svg>
+                </button>
               </div>
             </Card>
           ))}

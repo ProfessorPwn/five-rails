@@ -23,6 +23,13 @@ export default function ConnectionsPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
+  const [editingConn, setEditingConn] = useState(false);
+  const [editConnForm, setEditConnForm] = useState({
+    base_url: "",
+    api_key: "",
+    model: "",
+  });
   const [form, setForm] = useState({
     provider: "ollama",
     base_url: "",
@@ -32,7 +39,7 @@ export default function ConnectionsPage() {
 
   const fetchConnections = () => {
     fetch("/api/connections")
-      .then((r) => r.json())
+      .then((r) => r.ok ? r.json() : [])
       .then((data) => {
         setConnections(Array.isArray(data) ? data : []);
         setLoading(false);
@@ -93,11 +100,48 @@ export default function ConnectionsPage() {
     }
   };
 
+  const openEditConnection = (conn: Connection) => {
+    setEditingConnection(conn);
+    setEditConnForm({
+      base_url: conn.base_url || "",
+      api_key: "",
+      model: conn.model || "",
+    });
+  };
+
+  const handleEditConnection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingConnection) return;
+    setEditingConn(true);
+    try {
+      const payload: Record<string, unknown> = {
+        base_url: editConnForm.base_url || undefined,
+        model: editConnForm.model || undefined,
+      };
+      if (editConnForm.api_key) {
+        payload.api_key_encrypted = editConnForm.api_key;
+      }
+      const res = await fetch(`/api/connections/${editingConnection.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        setEditingConnection(null);
+        fetchConnections();
+      }
+    } finally {
+      setEditingConn(false);
+    }
+  };
+
   const providerDefaults: Record<string, { base_url: string; model: string }> = {
     ollama: { base_url: "http://127.0.0.1:11434", model: "llama3" },
     openai: { base_url: "https://api.openai.com", model: "gpt-4o-mini" },
     anthropic: { base_url: "https://api.anthropic.com", model: "claude-sonnet-4-20250514" },
     perplexity: { base_url: "https://api.perplexity.ai", model: "sonar" },
+    exa: { base_url: "https://api.exa.ai", model: "" },
+    firecrawl: { base_url: "https://api.firecrawl.dev", model: "" },
   };
 
   const providerIcons: Record<string, React.ReactNode> = {
@@ -180,7 +224,10 @@ export default function ConnectionsPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold text-[#e2e8f0]">
+                    <h3
+                      className="text-sm font-semibold text-[#e2e8f0] cursor-pointer hover:text-amber-400 transition-colors"
+                      onClick={() => openEditConnection(conn)}
+                    >
                       {conn.provider}
                     </h3>
                     <Badge variant={conn.provider === "ollama" ? "emerald" : conn.provider === "openai" ? "blue" : conn.provider === "anthropic" ? "violet" : "rose"}>
@@ -188,8 +235,11 @@ export default function ConnectionsPage() {
                     </Badge>
                   </div>
                   <div className="flex items-center gap-3 mt-1">
-                    <span className="text-xs text-[#64748b]">{conn.model || "default"}</span>
-                    <span className="text-[10px] text-[#64748b]">{conn.base_url}</span>
+                    <span
+                      className="text-xs text-[#64748b] cursor-pointer hover:text-amber-400 transition-colors"
+                      onClick={() => openEditConnection(conn)}
+                    >{conn.model || "default"}</span>
+                    {conn.base_url && <span className="text-[10px] text-[#64748b]">{conn.base_url}</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -245,6 +295,8 @@ export default function ConnectionsPage() {
               { value: "openai", label: "OpenAI" },
               { value: "anthropic", label: "Anthropic" },
               { value: "perplexity", label: "Perplexity" },
+              { value: "exa", label: "Exa" },
+              { value: "firecrawl", label: "Firecrawl" },
             ]}
           />
           <Input
@@ -274,6 +326,45 @@ export default function ConnectionsPage() {
             </Button>
             <Button type="submit" disabled={creating}>
               {creating ? "Adding..." : "Add Connection"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal open={!!editingConnection} onClose={() => setEditingConnection(null)} title="Edit Connection">
+        <form onSubmit={handleEditConnection} className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-[#94a3b8] mb-1.5">Provider</label>
+            <div className="bg-[#0f1118] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-[#64748b]">
+              {editingConnection?.provider}
+            </div>
+          </div>
+          <Input
+            label="Base URL"
+            placeholder="https://api.openai.com"
+            value={editConnForm.base_url}
+            onChange={(e) => setEditConnForm({ ...editConnForm, base_url: e.target.value })}
+          />
+          <Input
+            label="API Key"
+            type="password"
+            placeholder="Leave blank to keep current key"
+            value={editConnForm.api_key}
+            onChange={(e) => setEditConnForm({ ...editConnForm, api_key: e.target.value })}
+          />
+          <Input
+            label="Model"
+            placeholder="e.g. gpt-4o-mini"
+            value={editConnForm.model}
+            onChange={(e) => setEditConnForm({ ...editConnForm, model: e.target.value })}
+          />
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" type="button" onClick={() => setEditingConnection(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={editingConn}>
+              {editingConn ? "Saving..." : "Save Changes"}
             </Button>
           </div>
         </form>

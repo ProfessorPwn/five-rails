@@ -35,6 +35,9 @@ export default function SkillsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [search, setSearch] = useState("");
+  const [filterRail, setFilterRail] = useState("all");
+
   // Execution state
   const [execSkill, setExecSkill] = useState<Skill | null>(null);
   const [execInput, setExecInput] = useState("");
@@ -44,8 +47,8 @@ export default function SkillsPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/skills").then((r) => r.json()).catch(() => []),
-      fetch("/api/projects").then((r) => r.json()).catch(() => []),
+      fetch("/api/skills").then((r) => r.ok ? r.json() : []).catch(() => []),
+      fetch("/api/projects").then((r) => r.ok ? r.json() : []).catch(() => []),
     ]).then(([sk, proj]) => {
       setSkills(Array.isArray(sk) ? sk : []);
       setProjects(Array.isArray(proj) ? proj : []);
@@ -75,13 +78,27 @@ export default function SkillsPage() {
     }
   };
 
+  const filteredSkills = skills.filter((s) => {
+    if (filterRail !== "all" && s.rail !== filterRail) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        s.name?.toLowerCase().includes(q) ||
+        s.description?.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
   // Group skills by rail
-  const grouped = skills.reduce<Record<string, Skill[]>>((acc, skill) => {
+  const grouped = filteredSkills.reduce<Record<string, Skill[]>>((acc, skill) => {
     const rail = skill.rail || "general";
     if (!acc[rail]) acc[rail] = [];
     acc[rail].push(skill);
     return acc;
   }, {});
+
+  const allRails = [...new Set(skills.map((s) => s.rail || "general"))];
 
   if (loading) {
     return (
@@ -97,9 +114,37 @@ export default function SkillsPage() {
       <div>
         <h1 className="text-2xl font-bold text-[#e2e8f0]">Skills</h1>
         <p className="text-sm text-[#94a3b8] mt-1">
-          {skills.length} skill{skills.length !== 1 ? "s" : ""} across {Object.keys(grouped).length} rail{Object.keys(grouped).length !== 1 ? "s" : ""}
+          {filteredSkills.length} skill{filteredSkills.length !== 1 ? "s" : ""} across {Object.keys(grouped).length} rail{Object.keys(grouped).length !== 1 ? "s" : ""}
+          {filteredSkills.length !== skills.length && ` (${skills.length} total)`}
         </p>
       </div>
+
+      {/* Filters */}
+      {skills.length > 0 && (
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <input
+              type="text"
+              placeholder="Search skills..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-[#0f1118] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] placeholder-[#64748b] focus:outline-none focus:border-amber-500"
+            />
+          </div>
+          <select
+            value={filterRail}
+            onChange={(e) => setFilterRail(e.target.value)}
+            className="bg-[#0f1118] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] focus:outline-none focus:border-amber-500 cursor-pointer"
+          >
+            <option value="all">All Rails</option>
+            {allRails.map((rail) => (
+              <option key={rail} value={rail}>
+                {(railMeta[rail]?.label) || rail.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {skills.length === 0 ? (
         <EmptyState
@@ -134,9 +179,11 @@ export default function SkillsPage() {
                       <div className="mb-3">
                         <span className="text-[10px] text-[#94a3b8] uppercase tracking-wider">Sub-agents</span>
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {skill.sub_agents.split(",").map((agent) => (
-                            <Badge key={agent.trim()} variant="default">
-                              {agent.trim()}
+                          {((() => {
+                            try { return JSON.parse(skill.sub_agents); } catch { return []; }
+                          })() as string[]).map((agent) => (
+                            <Badge key={agent} variant="default">
+                              {agent.replace(/_/g, " ")}
                             </Badge>
                           ))}
                         </div>

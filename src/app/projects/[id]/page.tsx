@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
-import { Input, Textarea } from "@/components/ui/Input";
+import { Input, Textarea, Select } from "@/components/ui/Input";
 import EmptyState from "@/components/ui/EmptyState";
 
-type Tab = "overview" | "tasks" | "files" | "activity" | "skills";
+type Tab = "overview" | "tasks" | "activity" | "skills";
 
 interface Project {
   id: string;
@@ -20,6 +20,16 @@ interface Project {
   score: number;
   status: string;
   created_at: string;
+}
+
+interface Task {
+  id: string;
+  title: string;
+  description: string | null;
+  status: "pending" | "in_progress" | "completed";
+  priority: number;
+  created_at: string;
+  completed_at: string | null;
 }
 
 interface Activity {
@@ -44,10 +54,27 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const { id } = use(params);
   const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [loading, setLoading] = useState(true);
+
+  // Edit project
+  const [showEditProject, setShowEditProject] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    description: "",
+    niche: "",
+    target_audience: "",
+    status: "idea",
+    score: 0,
+  });
+  const [savingProject, setSavingProject] = useState(false);
+
+  // Delete project
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingProject, setDeletingProject] = useState(false);
 
   // Skill execution
   const [execSkill, setExecSkill] = useState<Skill | null>(null);
@@ -60,18 +87,102 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [taskForm, setTaskForm] = useState({ title: "", description: "" });
   const [creatingTask, setCreatingTask] = useState(false);
 
+  // Task deletion
+  const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
+  const [deletingTask, setDeletingTask] = useState(false);
+
+  // Toggling task status (track in-flight toggles)
+  const [togglingTaskIds, setTogglingTaskIds] = useState<Set<string>>(new Set());
+
+  const fetchProject = useCallback(async () => {
+    const res = await fetch(`/api/projects/${id}`);
+    if (res.ok) {
+      const data = await res.json();
+      setProject(data);
+      return data;
+    }
+    return null;
+  }, [id]);
+
+  const fetchTasks = useCallback(async () => {
+    const res = await fetch(`/api/tasks?project_id=${id}`);
+    if (res.ok) {
+      const data = await res.json();
+      setTasks(Array.isArray(data) ? data : []);
+    }
+  }, [id]);
+
+  const fetchActivity = useCallback(async () => {
+    const res = await fetch(`/api/activity?project_id=${id}`);
+    if (res.ok) {
+      const data = await res.json();
+      setActivity(Array.isArray(data) ? data : []);
+    }
+  }, [id]);
+
   useEffect(() => {
     Promise.all([
-      fetch(`/api/projects/${id}`).then((r) => r.json()).catch(() => null),
-      fetch(`/api/activity?project_id=${id}`).then((r) => r.json()).catch(() => []),
-      fetch("/api/skills").then((r) => r.json()).catch(() => []),
-    ]).then(([proj, act, sk]) => {
-      setProject(proj);
-      setActivity(Array.isArray(act) ? act : []);
+      fetchProject(),
+      fetchTasks(),
+      fetchActivity(),
+      fetch("/api/skills").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+    ]).then(([, , , sk]) => {
       setSkills(Array.isArray(sk) ? sk : []);
       setLoading(false);
     });
-  }, [id]);
+  }, [fetchProject, fetchTasks, fetchActivity]);
+
+  // Open edit modal -- populate form with current project data
+  const openEditModal = () => {
+    if (!project) return;
+    setEditForm({
+      name: project.name || "",
+      description: project.description || "",
+      niche: project.niche || "",
+      target_audience: project.target_audience || "",
+      status: project.status || "idea",
+      score: project.score ?? 0,
+    });
+    setShowEditProject(true);
+  };
+
+  const handleEditProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingProject(true);
+    try {
+      const res = await fetch(`/api/projects/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editForm.name,
+          description: editForm.description,
+          niche: editForm.niche,
+          target_audience: editForm.target_audience,
+          status: editForm.status,
+          score: Number(editForm.score),
+        }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setProject(updated);
+        setShowEditProject(false);
+      }
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  const handleDeleteProject = async () => {
+    setDeletingProject(true);
+    try {
+      const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        router.push("/projects");
+      }
+    } finally {
+      setDeletingProject(false);
+    }
+  };
 
   const handleRunSkill = async () => {
     if (!execSkill || !execInput.trim()) return;
@@ -85,7 +196,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       });
       const data = await res.json();
       setExecResult(data.output || data.error || JSON.stringify(data));
-    } catch (err) {
+    } catch {
       setExecResult("Execution failed");
     } finally {
       setExecRunning(false);
@@ -94,21 +205,77 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Tasks are logged as activity for now
     setCreatingTask(true);
     try {
-      await fetch(`/api/projects/${id}`, {
-        method: "PATCH",
+      const res = await fetch("/api/tasks", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ last_task: taskForm.title }),
+        body: JSON.stringify({
+          project_id: id,
+          title: taskForm.title,
+          description: taskForm.description || undefined,
+        }),
       });
-      setTaskForm({ title: "", description: "" });
-      setShowCreateTask(false);
-      // Refresh activity
-      const act = await fetch(`/api/activity?project_id=${id}`).then((r) => r.json()).catch(() => []);
-      setActivity(Array.isArray(act) ? act : []);
+      if (res.ok) {
+        setTaskForm({ title: "", description: "" });
+        setShowCreateTask(false);
+        await fetchTasks();
+      }
     } finally {
       setCreatingTask(false);
+    }
+  };
+
+  const handleToggleTask = async (task: Task) => {
+    const newStatus = task.status === "completed" ? "pending" : "completed";
+    setTogglingTaskIds((prev) => new Set(prev).add(task.id));
+    // Optimistic update
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === task.id
+          ? { ...t, status: newStatus, completed_at: newStatus === "completed" ? new Date().toISOString() : null }
+          : t
+      )
+    );
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      } else {
+        // Revert on failure
+        setTasks((prev) =>
+          prev.map((t) => (t.id === task.id ? task : t))
+        );
+      }
+    } catch {
+      setTasks((prev) =>
+        prev.map((t) => (t.id === task.id ? task : t))
+      );
+    } finally {
+      setTogglingTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
+    }
+  };
+
+  const handleDeleteTask = async () => {
+    if (!deleteTaskId) return;
+    setDeletingTask(true);
+    try {
+      const res = await fetch(`/api/tasks/${deleteTaskId}`, { method: "DELETE" });
+      if (res.ok) {
+        setTasks((prev) => prev.filter((t) => t.id !== deleteTaskId));
+        setDeleteTaskId(null);
+      }
+    } finally {
+      setDeletingTask(false);
     }
   };
 
@@ -136,7 +303,6 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "tasks", label: "Tasks" },
-    { key: "files", label: "Files" },
     { key: "activity", label: "Activity" },
     { key: "skills", label: "Skills" },
   ];
@@ -156,6 +322,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     { name: "Outbound Spine", key: "outbound", color: "bg-violet-400", active: false },
     { name: "Audience Rail", key: "audience", color: "bg-rose-400", active: false },
   ];
+
+  const completedCount = tasks.filter((t) => t.status === "completed").length;
+  const pendingCount = tasks.filter((t) => t.status !== "completed").length;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -189,6 +358,20 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             )}
           </div>
         </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button size="sm" variant="secondary" onClick={openEditModal}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M10.5 1.5l2 2-8 8H2.5v-2l8-8z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Edit
+          </Button>
+          <Button size="sm" variant="danger" onClick={() => setShowDeleteConfirm(true)}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M2 4h10M5 4V2.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5V4m1.5 0v7.5a1 1 0 01-1 1h-5a1 1 0 01-1-1V4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Delete
+          </Button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -204,6 +387,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             }`}
           >
             {tab.label}
+            {tab.key === "tasks" && tasks.length > 0 && (
+              <span className="ml-1.5 text-[10px] text-[#64748b]">
+                {completedCount}/{tasks.length}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -212,6 +400,31 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       <div>
         {activeTab === "overview" && (
           <div className="space-y-6">
+            {/* Project Details */}
+            {(project.target_audience || project.niche) && (
+              <div>
+                <h2 className="text-sm font-semibold text-[#94a3b8] uppercase tracking-wider mb-3">
+                  Project Details
+                </h2>
+                <Card hover={false}>
+                  <div className="grid grid-cols-2 gap-4">
+                    {project.niche && (
+                      <div>
+                        <div className="text-xs text-[#64748b] mb-1">Niche</div>
+                        <div className="text-sm text-[#e2e8f0]">{project.niche}</div>
+                      </div>
+                    )}
+                    {project.target_audience && (
+                      <div>
+                        <div className="text-xs text-[#64748b] mb-1">Target Audience</div>
+                        <div className="text-sm text-[#e2e8f0]">{project.target_audience}</div>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              </div>
+            )}
+
             {/* Rail Status */}
             <div>
               <h2 className="text-sm font-semibold text-[#94a3b8] uppercase tracking-wider mb-3">
@@ -236,22 +449,31 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               <h2 className="text-sm font-semibold text-[#94a3b8] uppercase tracking-wider mb-3">
                 Quick Stats
               </h2>
-            <div className="grid grid-cols-3 gap-4">
-              <Card hover={false}>
-                <div className="text-xs text-[#64748b] mb-1">Activities</div>
-                <div className="text-2xl font-bold text-[#e2e8f0]">{activity.length}</div>
-              </Card>
-              <Card hover={false}>
-                <div className="text-xs text-[#64748b] mb-1">Available Skills</div>
-                <div className="text-2xl font-bold text-[#e2e8f0]">{skills.length}</div>
-              </Card>
-              <Card hover={false}>
-                <div className="text-xs text-[#64748b] mb-1">Created</div>
-                <div className="text-sm font-medium text-[#e2e8f0]">
-                  {new Date(project.created_at).toLocaleDateString()}
-                </div>
-              </Card>
-            </div>
+              <div className="grid grid-cols-4 gap-4">
+                <Card hover={false}>
+                  <div className="text-xs text-[#64748b] mb-1">Tasks</div>
+                  <div className="text-2xl font-bold text-[#e2e8f0]">{tasks.length}</div>
+                  {tasks.length > 0 && (
+                    <div className="text-[10px] text-[#64748b] mt-1">
+                      {completedCount} done, {pendingCount} remaining
+                    </div>
+                  )}
+                </Card>
+                <Card hover={false}>
+                  <div className="text-xs text-[#64748b] mb-1">Activities</div>
+                  <div className="text-2xl font-bold text-[#e2e8f0]">{activity.length}</div>
+                </Card>
+                <Card hover={false}>
+                  <div className="text-xs text-[#64748b] mb-1">Available Skills</div>
+                  <div className="text-2xl font-bold text-[#e2e8f0]">{skills.length}</div>
+                </Card>
+                <Card hover={false}>
+                  <div className="text-xs text-[#64748b] mb-1">Created</div>
+                  <div className="text-sm font-medium text-[#e2e8f0]">
+                    {new Date(project.created_at).toLocaleDateString()}
+                  </div>
+                </Card>
+              </div>
             </div>
 
             {/* What's Next */}
@@ -290,7 +512,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 Add Task
               </Button>
             </div>
-            {activity.filter((a) => (a.action || "").includes("task") || (a.action || "").includes("project")).length === 0 ? (
+            {tasks.length === 0 ? (
               <EmptyState
                 title="No tasks yet"
                 description="Create tasks to track your project progress."
@@ -299,20 +521,79 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               />
             ) : (
               <div className="space-y-2">
-                {activity
-                  .filter((a) => (a.action || "").includes("task") || (a.action || "").includes("project"))
-                  .map((item) => (
-                    <Card key={item.id} hover={false} className="!p-3 flex items-center gap-3">
-                      <div className="w-4 h-4 rounded border border-[#1e293b] flex-shrink-0" />
-                      <span className="text-sm text-[#e2e8f0] flex-1">{item.details}</span>
-                      <span className="text-[10px] text-[#64748b]">
-                        {new Date(item.created_at).toLocaleDateString()}
-                      </span>
+                {tasks.map((task) => {
+                  const isCompleted = task.status === "completed";
+                  const isToggling = togglingTaskIds.has(task.id);
+                  return (
+                    <Card key={task.id} hover={false} className="!p-3">
+                      <div className="flex items-start gap-3">
+                        {/* Checkbox */}
+                        <button
+                          onClick={() => handleToggleTask(task)}
+                          disabled={isToggling}
+                          className={`w-5 h-5 rounded border flex-shrink-0 mt-0.5 flex items-center justify-center transition-colors cursor-pointer ${
+                            isCompleted
+                              ? "bg-amber-500 border-amber-500"
+                              : "border-[#1e293b] hover:border-amber-500/50"
+                          } ${isToggling ? "opacity-50" : ""}`}
+                        >
+                          {isCompleted && (
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                              <path d="M2.5 6l2.5 2.5 4.5-5" stroke="#0a0c14" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          )}
+                        </button>
+
+                        {/* Task content */}
+                        <div className="flex-1 min-w-0">
+                          <span
+                            className={`text-sm ${
+                              isCompleted
+                                ? "text-[#64748b] line-through"
+                                : "text-[#e2e8f0]"
+                            }`}
+                          >
+                            {task.title}
+                          </span>
+                          {task.description && (
+                            <p
+                              className={`text-xs mt-0.5 ${
+                                isCompleted ? "text-[#475569] line-through" : "text-[#64748b]"
+                              }`}
+                            >
+                              {task.description}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <span className="text-[10px] text-[#64748b]">
+                              {new Date(task.created_at).toLocaleDateString()}
+                            </span>
+                            {task.completed_at && (
+                              <span className="text-[10px] text-emerald-500/70">
+                                Completed {new Date(task.completed_at).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Delete button */}
+                        <button
+                          onClick={() => setDeleteTaskId(task.id)}
+                          className="text-[#64748b] hover:text-red-400 transition-colors p-1 cursor-pointer shrink-0"
+                          title="Delete task"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                            <path d="M2 4h10M5 4V2.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5V4m1.5 0v7.5a1 1 0 01-1 1h-5a1 1 0 01-1-1V4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      </div>
                     </Card>
-                  ))}
+                  );
+                })}
               </div>
             )}
 
+            {/* Create Task Modal */}
             <Modal open={showCreateTask} onClose={() => setShowCreateTask(false)} title="Add Task">
               <form onSubmit={handleCreateTask} className="space-y-4">
                 <Input
@@ -338,20 +619,28 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 </div>
               </form>
             </Modal>
-          </div>
-        )}
 
-        {activeTab === "files" && (
-          <EmptyState
-            icon={
-              <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                <path d="M12 8h16l8 8v24a2 2 0 01-2 2H14a2 2 0 01-2-2V8z" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M28 8v8h8" stroke="currentColor" strokeWidth="1.5" />
-              </svg>
-            }
-            title="No files yet"
-            description="Files generated by skill executions will appear here."
-          />
+            {/* Delete Task Confirmation Modal */}
+            <Modal
+              open={!!deleteTaskId}
+              onClose={() => setDeleteTaskId(null)}
+              title="Delete Task"
+            >
+              <div className="space-y-4">
+                <p className="text-sm text-[#94a3b8]">
+                  Are you sure you want to delete this task? This action cannot be undone.
+                </p>
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button variant="ghost" onClick={() => setDeleteTaskId(null)}>
+                    Cancel
+                  </Button>
+                  <Button variant="danger" onClick={handleDeleteTask} disabled={deletingTask}>
+                    {deletingTask ? "Deleting..." : "Delete Task"}
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          </div>
         )}
 
         {activeTab === "activity" && (
@@ -409,7 +698,9 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                       )}
                       {skill.sub_agents && (
                         <p className="text-[10px] text-[#94a3b8] mb-3">
-                          Agents: {skill.sub_agents}
+                          Agents: {(() => {
+                            try { return (JSON.parse(skill.sub_agents) as string[]).join(", ").replace(/_/g, " "); } catch { return skill.sub_agents; }
+                          })()}
                         </p>
                       )}
                       <Button
@@ -474,6 +765,83 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           </div>
         )}
       </div>
+
+      {/* Edit Project Modal */}
+      <Modal open={showEditProject} onClose={() => setShowEditProject(false)} title="Edit Project">
+        <form onSubmit={handleEditProject} className="space-y-4">
+          <Input
+            label="Project Name"
+            placeholder="Project name"
+            value={editForm.name}
+            onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+            required
+          />
+          <Textarea
+            label="Description"
+            placeholder="What is this project about?"
+            value={editForm.description}
+            onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+          />
+          <Input
+            label="Niche"
+            placeholder="e.g. SaaS, e-commerce, coaching..."
+            value={editForm.niche}
+            onChange={(e) => setEditForm({ ...editForm, niche: e.target.value })}
+          />
+          <Input
+            label="Target Audience"
+            placeholder="Who is this for?"
+            value={editForm.target_audience}
+            onChange={(e) => setEditForm({ ...editForm, target_audience: e.target.value })}
+          />
+          <Select
+            label="Status"
+            value={editForm.status}
+            onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+            options={[
+              { value: "idea", label: "Idea" },
+              { value: "active", label: "Active" },
+              { value: "shipped", label: "Shipped" },
+              { value: "archived", label: "Archived" },
+            ]}
+          />
+          <Input
+            label="Score"
+            type="number"
+            min={0}
+            max={100}
+            placeholder="0-100"
+            value={editForm.score}
+            onChange={(e) => setEditForm({ ...editForm, score: Number(e.target.value) })}
+          />
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" type="button" onClick={() => setShowEditProject(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={savingProject || !editForm.name.trim()}>
+              {savingProject ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete Project Confirmation Modal */}
+      <Modal open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} title="Delete Project">
+        <div className="space-y-4">
+          <p className="text-sm text-[#94a3b8]">
+            Are you sure you want to delete <strong className="text-[#e2e8f0]">{project.name}</strong>?
+            This will permanently remove the project and all associated tasks, content, and contacts.
+          </p>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" onClick={() => setShowDeleteConfirm(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={handleDeleteProject} disabled={deletingProject}>
+              {deletingProject ? "Deleting..." : "Delete Project"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

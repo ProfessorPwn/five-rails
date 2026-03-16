@@ -47,12 +47,12 @@ export default function DashboardPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/projects").then((r) => r.json()).catch(() => []),
-      fetch("/api/activity").then((r) => r.json()).catch(() => []),
-      fetch("/api/skills").then((r) => r.json()).catch(() => []),
-      fetch("/api/insights").then((r) => r.json()).catch(() => []),
-      fetch("/api/outbound").then((r) => r.json()).catch(() => []),
-      fetch("/api/content").then((r) => r.json()).catch(() => []),
+      fetch("/api/projects").then((r) => r.ok ? r.json() : []).catch(() => []),
+      fetch("/api/activity").then((r) => r.ok ? r.json() : []).catch(() => []),
+      fetch("/api/skills").then((r) => r.ok ? r.json() : []).catch(() => []),
+      fetch("/api/insights").then((r) => r.ok ? r.json() : []).catch(() => []),
+      fetch("/api/outbound").then((r) => r.ok ? r.json() : []).catch(() => []),
+      fetch("/api/content").then((r) => r.ok ? r.json() : []).catch(() => []),
     ]).then(([proj, act, sk, ins, cont, ctn]) => {
       setProjects(Array.isArray(proj) ? proj : []);
       setActivity(Array.isArray(act) ? act : []);
@@ -114,7 +114,7 @@ export default function DashboardPage() {
       bgColor: "bg-emerald-500/10",
       borderColor: "border-emerald-500/20",
       count: projects.reduce((acc, p) => acc + (p.status === "active" ? 1 : 0), 0),
-      label: "active tasks",
+      label: "active projects",
     },
     {
       name: "Outbound Spine",

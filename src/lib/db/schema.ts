@@ -67,8 +67,7 @@ function initSchema(db: Database.Database): void {
       details TEXT,
       rail TEXT,
       skill_used TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS skills (

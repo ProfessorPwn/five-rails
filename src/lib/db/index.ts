@@ -80,7 +80,7 @@ export interface ContentPiece {
   title: string;
   content: string | null;
   platform: string | null;
-  status: 'draft' | 'scheduled' | 'published';
+  status: 'draft' | 'scheduled' | 'published' | 'archived';
   scheduled_at: string | null;
   created_at: string;
 }
@@ -223,6 +223,41 @@ export function attachInsightToProject(insightId: string, projectId: string): bo
   return result.changes > 0;
 }
 
+// ─── Market Insight Update/Delete ────────────────────────────────────────────
+
+export function updateInsight(id: string, data: Partial<{
+  title: string;
+  description: string;
+  source: string;
+  pain_point: string;
+  solution: string;
+  score: number;
+  category: string;
+  project_id: string;
+}>): MarketInsight | undefined {
+  const existing = getDb().prepare('SELECT * FROM market_insights WHERE id = ?').get(id) as MarketInsight | undefined;
+  if (!existing) return undefined;
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (data.title !== undefined) { fields.push('title = ?'); values.push(data.title); }
+  if (data.description !== undefined) { fields.push('description = ?'); values.push(data.description); }
+  if (data.source !== undefined) { fields.push('source = ?'); values.push(data.source); }
+  if (data.pain_point !== undefined) { fields.push('pain_point = ?'); values.push(data.pain_point); }
+  if (data.solution !== undefined) { fields.push('solution = ?'); values.push(data.solution); }
+  if (data.score !== undefined) { fields.push('score = ?'); values.push(data.score); }
+  if (data.category !== undefined) { fields.push('category = ?'); values.push(data.category); }
+  if (data.project_id !== undefined) { fields.push('project_id = ?'); values.push(data.project_id); }
+  if (fields.length === 0) return existing;
+  values.push(id);
+  getDb().prepare(`UPDATE market_insights SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  return getDb().prepare('SELECT * FROM market_insights WHERE id = ?').get(id) as MarketInsight;
+}
+
+export function deleteInsight(id: string): boolean {
+  const result = getDb().prepare('DELETE FROM market_insights WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 
 export function getTasks(): Task[] {
@@ -293,6 +328,11 @@ export function updateTask(id: string, data: Partial<{
   values.push(id);
   getDb().prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`).run(...values);
   return getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task;
+}
+
+export function deleteTask(id: string): boolean {
+  const result = getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id);
+  return result.changes > 0;
 }
 
 // ─── Activity Log ─────────────────────────────────────────────────────────────
@@ -530,6 +570,18 @@ export function updateContact(id: string, data: Partial<{
   values.push(id);
   getDb().prepare(`UPDATE outbound_contacts SET ${fields.join(', ')} WHERE id = ?`).run(...values);
   return getDb().prepare('SELECT * FROM outbound_contacts WHERE id = ?').get(id) as OutboundContact;
+}
+
+export function deleteContact(id: string): boolean {
+  const result = getDb().prepare('DELETE FROM outbound_contacts WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+// ─── Content Deletion ────────────────────────────────────────────────────────
+
+export function deleteContent(id: string): boolean {
+  const result = getDb().prepare('DELETE FROM content_pieces WHERE id = ?').run(id);
+  return result.changes > 0;
 }
 
 // ─── Files ────────────────────────────────────────────────────────────────────

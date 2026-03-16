@@ -54,6 +54,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     }
     await logActivity({
       action: "project_deleted",
+      project_id: id,
       details: `Deleted project: ${project.name}`,
     });
     await deleteProject(id);

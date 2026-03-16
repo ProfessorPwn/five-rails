@@ -53,9 +53,21 @@ export default function AudiencePage() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [search, setSearch] = useState("");
   const [filterProject, setFilterProject] = useState("all");
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [editingContent, setEditingContent] = useState<ContentPiece | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({
+    title: "",
+    type: "post",
+    content: "",
+    platform: "Twitter",
+    status: "draft",
+    scheduled_at: "",
+    project_id: "",
+  });
   const [form, setForm] = useState({
     title: "",
     type: "post",
@@ -67,8 +79,8 @@ export default function AudiencePage() {
 
   const fetchData = () => {
     Promise.all([
-      fetch("/api/content").then((r) => r.json()).catch(() => []),
-      fetch("/api/projects").then((r) => r.json()).catch(() => []),
+      fetch("/api/content").then((r) => r.ok ? r.json() : []).catch(() => []),
+      fetch("/api/projects").then((r) => r.ok ? r.json() : []).catch(() => []),
     ]).then(([ctn, proj]) => {
       setContent(Array.isArray(ctn) ? ctn : []);
       setProjects(Array.isArray(proj) ? proj : []);
@@ -100,10 +112,73 @@ export default function AudiencePage() {
     }
   };
 
+  const openEditModal = (piece: ContentPiece) => {
+    setEditingContent(piece);
+    setEditForm({
+      title: piece.title || "",
+      type: piece.type || "post",
+      content: piece.content || "",
+      platform: piece.platform || "Twitter",
+      status: piece.status || "draft",
+      scheduled_at: piece.scheduled_at ? piece.scheduled_at.slice(0, 16) : "",
+      project_id: piece.project_id || "",
+    });
+  };
+
+  const handleEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingContent || !editForm.title.trim()) return;
+    setEditing(true);
+    try {
+      const payload: Record<string, unknown> = {
+        title: editForm.title,
+        type: editForm.type,
+        content: editForm.content,
+        platform: editForm.platform,
+        status: editForm.status,
+        project_id: editForm.project_id || null,
+      };
+      if (editForm.status === "scheduled" && editForm.scheduled_at) {
+        payload.scheduled_at = new Date(editForm.scheduled_at).toISOString();
+      } else {
+        payload.scheduled_at = null;
+      }
+      const res = await fetch(`/api/content/${editingContent.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        setEditingContent(null);
+        fetchData();
+      }
+    } finally {
+      setEditing(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this content piece?")) return;
+    try {
+      await fetch(`/api/content/${id}`, { method: "DELETE" });
+      fetchData();
+    } catch {
+      // ignore
+    }
+  };
+
   const filtered = content.filter((c) => {
     if (filterProject !== "all" && c.project_id !== filterProject) return false;
     if (filterType !== "all" && c.type !== filterType) return false;
     if (filterStatus !== "all" && c.status !== filterStatus) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        c.title?.toLowerCase().includes(q) ||
+        c.content?.toLowerCase().includes(q) ||
+        c.platform?.toLowerCase().includes(q)
+      );
+    }
     return true;
   });
 
@@ -190,6 +265,15 @@ export default function AudiencePage() {
 
       {/* Filters */}
       <div className="flex items-center gap-3">
+        <div className="flex-1">
+          <input
+            type="text"
+            placeholder="Search content..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full bg-[#0f1118] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] placeholder-[#64748b] focus:outline-none focus:border-amber-500"
+          />
+        </div>
         <select
           value={filterProject}
           onChange={(e) => setFilterProject(e.target.value)}
@@ -231,7 +315,7 @@ export default function AudiencePage() {
                 <path d="M8 36V12l10-6 10 6 10-6v24l-10 6-10-6-10 6z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
               </svg>
             }
-            title={filterType !== "all" || filterStatus !== "all" ? "No matching content" : "No content yet"}
+            title={search || filterType !== "all" || filterStatus !== "all" ? "No matching content" : "No content yet"}
             description="Create content pieces to distribute across your channels."
             actionLabel="Create Content"
             onAction={() => setShowCreate(true)}
@@ -241,7 +325,10 @@ export default function AudiencePage() {
             {filtered.map((piece) => (
               <Card key={piece.id}>
                 <div className="flex items-start justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-[#e2e8f0] pr-2 line-clamp-2">
+                  <h3
+                    className="text-sm font-semibold text-[#e2e8f0] pr-2 line-clamp-2 cursor-pointer hover:text-amber-400 transition-colors"
+                    onClick={() => openEditModal(piece)}
+                  >
                     {piece.title}
                   </h3>
                   <Badge variant={typeColors[piece.type] || "amber"}>
@@ -260,9 +347,19 @@ export default function AudiencePage() {
                       <span className="text-[10px] text-[#64748b]">{piece.platform}</span>
                     )}
                   </div>
-                  <span className="text-[10px] text-[#64748b]">
-                    {new Date(piece.created_at).toLocaleDateString()}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-[#64748b]">
+                      {new Date(piece.created_at).toLocaleDateString()}
+                    </span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDelete(piece.id); }}
+                      className="text-[#64748b] hover:text-red-400 transition-colors cursor-pointer"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                        <path d="M3 3.5h8M5.5 3.5V2.5a1 1 0 011-1h1a1 1 0 011 1v1M4 3.5l.5 8a1 1 0 001 1h3a1 1 0 001-1l.5-8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               </Card>
             ))}
@@ -379,6 +476,75 @@ export default function AudiencePage() {
             </Button>
             <Button type="submit" disabled={creating || !form.title.trim()}>
               {creating ? "Creating..." : "Create Content"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal open={!!editingContent} onClose={() => setEditingContent(null)} title="Edit Content">
+        <form onSubmit={handleEdit} className="space-y-4">
+          <Input
+            label="Title"
+            placeholder="Content title..."
+            value={editForm.title}
+            onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+            required
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <Select
+              label="Type"
+              value={editForm.type}
+              onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
+              options={contentTypes.map((t) => ({ value: t, label: t.replace(/_/g, " ") }))}
+            />
+            <Select
+              label="Platform"
+              value={editForm.platform}
+              onChange={(e) => setEditForm({ ...editForm, platform: e.target.value })}
+              options={platforms.map((p) => ({ value: p, label: p }))}
+            />
+          </div>
+          <Textarea
+            label="Content"
+            placeholder="Write your content here..."
+            value={editForm.content}
+            onChange={(e) => setEditForm({ ...editForm, content: e.target.value })}
+            rows={6}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <Select
+              label="Status"
+              value={editForm.status}
+              onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+              options={statuses.map((s) => ({ value: s, label: s }))}
+            />
+            {projects.length > 0 && (
+              <Select
+                label="Project"
+                value={editForm.project_id}
+                onChange={(e) => setEditForm({ ...editForm, project_id: e.target.value })}
+                options={[
+                  { value: "", label: "None" },
+                  ...projects.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+              />
+            )}
+          </div>
+          {editForm.status === "scheduled" && (
+            <Input
+              label="Scheduled At"
+              type="datetime-local"
+              value={editForm.scheduled_at}
+              onChange={(e) => setEditForm({ ...editForm, scheduled_at: e.target.value })}
+            />
+          )}
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" type="button" onClick={() => setEditingContent(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={editing || !editForm.title.trim()}>
+              {editing ? "Saving..." : "Save Changes"}
             </Button>
           </div>
         </form>

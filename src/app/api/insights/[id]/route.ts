@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { updateContent, deleteContent, logActivity } from "@/lib/db";
+import { updateInsight, deleteInsight, logActivity } from "@/lib/db";
 import { safeParseJson } from "@/lib/validation";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -9,23 +9,23 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const { id } = await context.params;
     const body = await safeParseJson(request);
     if (!body) return NextResponse.json({ error: "Invalid or missing JSON body" }, { status: 400 });
-    const content = await updateContent(id, body);
-    if (!content) {
+    const insight = await updateInsight(id, body);
+    if (!insight) {
       return NextResponse.json(
-        { error: "Content not found" },
+        { error: "Insight not found" },
         { status: 404 }
       );
     }
     await logActivity({
-      action: "content_updated",
-      project_id: content.project_id || undefined,
-      details: `Updated content: ${content.title || id}`,
+      action: "insight_updated",
+      project_id: insight.project_id || undefined,
+      details: `Updated insight: ${insight.title || id}`,
     });
-    return NextResponse.json(content);
+    return NextResponse.json(insight);
   } catch (error) {
-    console.error("PATCH /api/content/[id] error:", error);
+    console.error("PATCH /api/insights/[id] error:", error);
     return NextResponse.json(
-      { error: "Failed to update content" },
+      { error: "Failed to update insight" },
       { status: 500 }
     );
   }
@@ -34,16 +34,22 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    deleteContent(id);
-    logActivity({
-      action: "content_deleted",
-      details: `Deleted content: ${id}`,
+    const deleted = await deleteInsight(id);
+    if (!deleted) {
+      return NextResponse.json(
+        { error: "Insight not found" },
+        { status: 404 }
+      );
+    }
+    await logActivity({
+      action: "insight_deleted",
+      details: `Deleted insight: ${id}`,
     });
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("DELETE /api/content/[id] error:", error);
+    console.error("DELETE /api/insights/[id] error:", error);
     return NextResponse.json(
-      { error: "Failed to delete content" },
+      { error: "Failed to delete insight" },
       { status: 500 }
     );
   }

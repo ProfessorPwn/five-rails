@@ -3,14 +3,19 @@ import {
   bulkImportIdeaBrowserIdeas,
   setIdeaBrowserConfig,
   logActivity,
+  getConnections,
 } from "@/lib/db";
-import { scrapeIdeaBrowser } from "@/lib/ideabrowser-scraper";
+import { syncFromGitHubArchive } from "@/lib/ideabrowser-github-sync";
 
 export async function POST() {
   try {
-    // Run the scraper
+    // Get active LLM connection for image-to-text extraction
+    const connections = getConnections();
+    const activeConnection = connections.find((c) => c.is_active === 1);
+
+    // Sync from GitHub screenshot archive
     const { ideas: scrapedIdeas, errors: scrapeErrors } =
-      await scrapeIdeaBrowser();
+      await syncFromGitHubArchive(activeConnection || undefined);
 
     if (scrapedIdeas.length === 0 && scrapeErrors.length > 0) {
       // Scraping completely failed — still update timestamp and log

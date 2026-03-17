@@ -12,8 +12,22 @@ export interface Project {
   target_audience: string | null;
   score: number;
   rail_status: string;
+  action_plan: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ActionPlanStep {
+  id: string;
+  label: string;
+  desc: string;
+  actionType: 'define-niche' | 'define-offer' | 'add-contacts' | 'skill';
+  skillId?: string;
+  skillName?: string;
+  promptContext?: string;
+  badge: string;
+  badgeVariant: 'default' | 'info' | 'warning' | 'rose' | 'amber';
+  saveAs?: 'insight' | 'landing_page' | 'email' | 'post' | 'lead_magnet' | 'script';
 }
 
 export interface MarketInsight {
@@ -82,6 +96,30 @@ export interface ContentPiece {
   platform: string | null;
   status: 'draft' | 'scheduled' | 'published' | 'archived';
   scheduled_at: string | null;
+  published_url: string | null;
+  published_at: string | null;
+  created_at: string;
+}
+
+export interface PlatformConnection {
+  id: string;
+  platform: 'twitter' | 'linkedin' | 'facebook' | 'instagram' | 'tiktok' | 'youtube' | 'email';
+  label: string | null;
+  api_key: string | null;
+  api_secret: string | null;
+  access_token: string | null;
+  access_token_secret: string | null;
+  refresh_token: string | null;
+  token_expires_at: string | null;
+  account_id: string | null;
+  username: string | null;
+  profile_image: string | null;
+  smtp_host: string | null;
+  smtp_port: number | null;
+  smtp_user: string | null;
+  smtp_pass: string | null;
+  from_email: string | null;
+  is_active: number;
   created_at: string;
 }
 
@@ -106,6 +144,21 @@ export interface FileRecord {
   type: string | null;
   content: string | null;
   created_at: string;
+}
+
+export interface Newsletter {
+  id: string;
+  project_id: string | null;
+  title: string;
+  subject: string | null;
+  content: string | null;
+  status: 'draft' | 'generating' | 'ready' | 'sent';
+  newsletter_type: 'weekly' | 'monthly' | 'roundup' | 'announcement' | 'educational' | 'promotional';
+  recipients: string | null;
+  sent_at: string | null;
+  sent_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 // ─── Projects ─────────────────────────────────────────────────────────────────
@@ -184,6 +237,12 @@ export function deleteProject(id: string): boolean {
   return result.changes > 0;
 }
 
+// ─── Action Plan ──────────────────────────────────────────────────────────────
+
+export function saveProjectPlan(projectId: string, plan: ActionPlanStep[]): void {
+  getDb().prepare('UPDATE projects SET action_plan = ?, updated_at = datetime(\'now\') WHERE id = ?').run(JSON.stringify(plan), projectId);
+}
+
 // ─── Market Insights ──────────────────────────────────────────────────────────
 
 export function getInsights(): MarketInsight[] {
@@ -221,6 +280,10 @@ export function createInsight(data: {
 export function attachInsightToProject(insightId: string, projectId: string): boolean {
   const result = getDb().prepare('UPDATE market_insights SET project_id = ? WHERE id = ?').run(projectId, insightId);
   return result.changes > 0;
+}
+
+export function getProjectInsights(projectId: string): MarketInsight[] {
+  return getDb().prepare('SELECT * FROM market_insights WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as MarketInsight[];
 }
 
 // ─── Market Insight Update/Delete ────────────────────────────────────────────
@@ -586,6 +649,127 @@ export function deleteContent(id: string): boolean {
   return result.changes > 0;
 }
 
+// ─── Platform Connections ────────────────────────────────────────────────────
+
+export function getPlatformConnections(): PlatformConnection[] {
+  return getDb().prepare('SELECT * FROM platform_connections ORDER BY created_at DESC').all() as PlatformConnection[];
+}
+
+export function getPlatformConnection(id: string): PlatformConnection | undefined {
+  return getDb().prepare('SELECT * FROM platform_connections WHERE id = ?').get(id) as PlatformConnection | undefined;
+}
+
+export function getActivePlatformConnection(platform: string): PlatformConnection | undefined {
+  return getDb().prepare('SELECT * FROM platform_connections WHERE platform = ? AND is_active = 1 LIMIT 1').get(platform) as PlatformConnection | undefined;
+}
+
+export function createPlatformConnection(data: {
+  platform: PlatformConnection['platform'];
+  label?: string;
+  api_key?: string;
+  api_secret?: string;
+  access_token?: string;
+  access_token_secret?: string;
+  refresh_token?: string;
+  token_expires_at?: string;
+  account_id?: string;
+  username?: string;
+  profile_image?: string;
+  smtp_host?: string;
+  smtp_port?: number;
+  smtp_user?: string;
+  smtp_pass?: string;
+  from_email?: string;
+  is_active?: boolean;
+}): PlatformConnection {
+  const id = uuidv4();
+  getDb().prepare(`
+    INSERT INTO platform_connections (id, platform, label, api_key, api_secret, access_token, access_token_secret, refresh_token, token_expires_at, account_id, username, profile_image, smtp_host, smtp_port, smtp_user, smtp_pass, from_email, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    data.platform,
+    data.label ?? null,
+    data.api_key ?? null,
+    data.api_secret ?? null,
+    data.access_token ?? null,
+    data.access_token_secret ?? null,
+    data.refresh_token ?? null,
+    data.token_expires_at ?? null,
+    data.account_id ?? null,
+    data.username ?? null,
+    data.profile_image ?? null,
+    data.smtp_host ?? null,
+    data.smtp_port ?? null,
+    data.smtp_user ?? null,
+    data.smtp_pass ?? null,
+    data.from_email ?? null,
+    data.is_active !== false ? 1 : 0,
+  );
+  return getDb().prepare('SELECT * FROM platform_connections WHERE id = ?').get(id) as PlatformConnection;
+}
+
+export function updatePlatformConnection(id: string, data: Partial<{
+  label: string;
+  api_key: string;
+  api_secret: string;
+  access_token: string;
+  access_token_secret: string;
+  refresh_token: string;
+  token_expires_at: string;
+  account_id: string;
+  username: string;
+  profile_image: string;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_user: string;
+  smtp_pass: string;
+  from_email: string;
+  is_active: boolean;
+}>): PlatformConnection | undefined {
+  const existing = getPlatformConnection(id);
+  if (!existing) return undefined;
+
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if (data.label !== undefined) { fields.push('label = ?'); values.push(data.label); }
+  if (data.api_key !== undefined) { fields.push('api_key = ?'); values.push(data.api_key); }
+  if (data.api_secret !== undefined) { fields.push('api_secret = ?'); values.push(data.api_secret); }
+  if (data.access_token !== undefined) { fields.push('access_token = ?'); values.push(data.access_token); }
+  if (data.access_token_secret !== undefined) { fields.push('access_token_secret = ?'); values.push(data.access_token_secret); }
+  if (data.refresh_token !== undefined) { fields.push('refresh_token = ?'); values.push(data.refresh_token); }
+  if (data.token_expires_at !== undefined) { fields.push('token_expires_at = ?'); values.push(data.token_expires_at); }
+  if (data.account_id !== undefined) { fields.push('account_id = ?'); values.push(data.account_id); }
+  if (data.username !== undefined) { fields.push('username = ?'); values.push(data.username); }
+  if (data.profile_image !== undefined) { fields.push('profile_image = ?'); values.push(data.profile_image); }
+  if (data.smtp_host !== undefined) { fields.push('smtp_host = ?'); values.push(data.smtp_host); }
+  if (data.smtp_port !== undefined) { fields.push('smtp_port = ?'); values.push(data.smtp_port); }
+  if (data.smtp_user !== undefined) { fields.push('smtp_user = ?'); values.push(data.smtp_user); }
+  if (data.smtp_pass !== undefined) { fields.push('smtp_pass = ?'); values.push(data.smtp_pass); }
+  if (data.from_email !== undefined) { fields.push('from_email = ?'); values.push(data.from_email); }
+  if (data.is_active !== undefined) { fields.push('is_active = ?'); values.push(data.is_active ? 1 : 0); }
+
+  if (fields.length === 0) return existing;
+
+  values.push(id);
+  getDb().prepare(`UPDATE platform_connections SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  return getPlatformConnection(id);
+}
+
+export function deletePlatformConnection(id: string): boolean {
+  const result = getDb().prepare('DELETE FROM platform_connections WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+export function getContentPiece(id: string): ContentPiece | undefined {
+  return getDb().prepare('SELECT * FROM content_pieces WHERE id = ?').get(id) as ContentPiece | undefined;
+}
+
+export function getOutboundContact(id: string): OutboundContact | undefined {
+  return getDb().prepare('SELECT * FROM outbound_contacts WHERE id = ?').get(id) as OutboundContact | undefined;
+}
+
 // ─── Files ────────────────────────────────────────────────────────────────────
 
 export function getFiles(): FileRecord[] {
@@ -616,4 +800,308 @@ export function createFile(data: {
     data.content ?? null,
   );
   return getDb().prepare('SELECT * FROM files WHERE id = ?').get(id) as FileRecord;
+}
+
+// ─── Newsletters ──────────────────────────────────────────────────────────────
+
+export function getNewsletters(): Newsletter[] {
+  return getDb().prepare('SELECT * FROM newsletters ORDER BY created_at DESC').all() as Newsletter[];
+}
+
+export function getProjectNewsletters(projectId: string): Newsletter[] {
+  return getDb().prepare('SELECT * FROM newsletters WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as Newsletter[];
+}
+
+export function getNewsletter(id: string): Newsletter | undefined {
+  return getDb().prepare('SELECT * FROM newsletters WHERE id = ?').get(id) as Newsletter | undefined;
+}
+
+export function createNewsletter(data: {
+  project_id?: string;
+  title: string;
+  subject?: string;
+  content?: string;
+  status?: Newsletter['status'];
+  newsletter_type?: Newsletter['newsletter_type'];
+  recipients?: string;
+}): Newsletter {
+  const id = uuidv4();
+  getDb().prepare(`
+    INSERT INTO newsletters (id, project_id, title, subject, content, status, newsletter_type, recipients)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    data.project_id ?? null,
+    data.title,
+    data.subject ?? null,
+    data.content ?? null,
+    data.status ?? 'draft',
+    data.newsletter_type ?? 'weekly',
+    data.recipients ?? null,
+  );
+  return getDb().prepare('SELECT * FROM newsletters WHERE id = ?').get(id) as Newsletter;
+}
+
+export function updateNewsletter(id: string, data: Partial<{
+  title: string;
+  subject: string;
+  content: string;
+  status: Newsletter['status'];
+  newsletter_type: Newsletter['newsletter_type'];
+  recipients: string;
+  sent_at: string;
+  sent_count: number;
+  project_id: string | null;
+}>): Newsletter | undefined {
+  const existing = getNewsletter(id);
+  if (!existing) return undefined;
+
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if (data.title !== undefined) { fields.push('title = ?'); values.push(data.title); }
+  if (data.subject !== undefined) { fields.push('subject = ?'); values.push(data.subject); }
+  if (data.content !== undefined) { fields.push('content = ?'); values.push(data.content); }
+  if (data.status !== undefined) { fields.push('status = ?'); values.push(data.status); }
+  if (data.newsletter_type !== undefined) { fields.push('newsletter_type = ?'); values.push(data.newsletter_type); }
+  if (data.recipients !== undefined) { fields.push('recipients = ?'); values.push(data.recipients); }
+  if (data.sent_at !== undefined) { fields.push('sent_at = ?'); values.push(data.sent_at); }
+  if (data.sent_count !== undefined) { fields.push('sent_count = ?'); values.push(data.sent_count); }
+  if (data.project_id !== undefined) { fields.push('project_id = ?'); values.push(data.project_id); }
+
+  if (fields.length === 0) return existing;
+
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+  getDb().prepare(`UPDATE newsletters SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  return getNewsletter(id);
+}
+
+export function deleteNewsletter(id: string): boolean {
+  const result = getDb().prepare('DELETE FROM newsletters WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+// Gather all project data for newsletter generation
+export function getNewsletterContext(projectId: string): {
+  project: Project | undefined;
+  content: ContentPiece[];
+  insights: MarketInsight[];
+  contacts: OutboundContact[];
+  activity: ActivityEntry[];
+  tasks: Task[];
+  newsletters: Newsletter[];
+} {
+  return {
+    project: getProject(projectId),
+    content: getProjectContent(projectId),
+    insights: getProjectInsights(projectId),
+    contacts: getProjectContacts(projectId),
+    activity: getProjectActivity(projectId),
+    tasks: getTasksByProject(projectId),
+    newsletters: getProjectNewsletters(projectId),
+  };
+}
+
+// ─── IdeaBrowser ──────────────────────────────────────────────────────────────
+
+export interface IdeaBrowserIdea {
+  id: string;
+  title: string;
+  description: string | null;
+  source_url: string | null;
+  category: string | null;
+  tags: string | null;
+  search_volume: string | null;
+  growth_rate: string | null;
+  pain_level: string | null;
+  feasibility: string | null;
+  founder_fit: string | null;
+  revenue_potential: string | null;
+  execution_difficulty: string | null;
+  go_to_market: string | null;
+  pricing: string | null;
+  target_market: string | null;
+  competition: string | null;
+  raw_data: string | null;
+  sync_status: 'scraped' | 'manual' | 'modified';
+  project_id: string | null;
+  imported_at: string;
+  updated_at: string;
+}
+
+export function getIdeaBrowserIdeas(): IdeaBrowserIdea[] {
+  return getDb().prepare('SELECT * FROM ideabrowser_ideas ORDER BY imported_at DESC').all() as IdeaBrowserIdea[];
+}
+
+export function getIdeaBrowserIdea(id: string): IdeaBrowserIdea | undefined {
+  return getDb().prepare('SELECT * FROM ideabrowser_ideas WHERE id = ?').get(id) as IdeaBrowserIdea | undefined;
+}
+
+export function getProjectIdeaBrowserIdeas(projectId: string): IdeaBrowserIdea[] {
+  return getDb().prepare('SELECT * FROM ideabrowser_ideas WHERE project_id = ? ORDER BY imported_at DESC').all(projectId) as IdeaBrowserIdea[];
+}
+
+export function createIdeaBrowserIdea(data: {
+  title: string;
+  description?: string;
+  source_url?: string;
+  category?: string;
+  tags?: string;
+  search_volume?: string;
+  growth_rate?: string;
+  pain_level?: string;
+  feasibility?: string;
+  founder_fit?: string;
+  revenue_potential?: string;
+  execution_difficulty?: string;
+  go_to_market?: string;
+  pricing?: string;
+  target_market?: string;
+  competition?: string;
+  raw_data?: string;
+  sync_status?: string;
+  project_id?: string;
+}): IdeaBrowserIdea {
+  const id = uuidv4();
+  getDb().prepare(`
+    INSERT INTO ideabrowser_ideas (id, title, description, source_url, category, tags, search_volume, growth_rate, pain_level, feasibility, founder_fit, revenue_potential, execution_difficulty, go_to_market, pricing, target_market, competition, raw_data, sync_status, project_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    data.title,
+    data.description || null,
+    data.source_url || null,
+    data.category || null,
+    data.tags || null,
+    data.search_volume || null,
+    data.growth_rate || null,
+    data.pain_level || null,
+    data.feasibility || null,
+    data.founder_fit || null,
+    data.revenue_potential || null,
+    data.execution_difficulty || null,
+    data.go_to_market || null,
+    data.pricing || null,
+    data.target_market || null,
+    data.competition || null,
+    data.raw_data || null,
+    data.sync_status || 'manual',
+    data.project_id || null,
+  );
+  return getIdeaBrowserIdea(id)!;
+}
+
+export function updateIdeaBrowserIdea(id: string, data: Partial<IdeaBrowserIdea>): IdeaBrowserIdea | undefined {
+  const existing = getIdeaBrowserIdea(id);
+  if (!existing) return undefined;
+
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if (data.title !== undefined) { fields.push('title = ?'); values.push(data.title); }
+  if (data.description !== undefined) { fields.push('description = ?'); values.push(data.description); }
+  if (data.source_url !== undefined) { fields.push('source_url = ?'); values.push(data.source_url); }
+  if (data.category !== undefined) { fields.push('category = ?'); values.push(data.category); }
+  if (data.tags !== undefined) { fields.push('tags = ?'); values.push(data.tags); }
+  if (data.search_volume !== undefined) { fields.push('search_volume = ?'); values.push(data.search_volume); }
+  if (data.growth_rate !== undefined) { fields.push('growth_rate = ?'); values.push(data.growth_rate); }
+  if (data.pain_level !== undefined) { fields.push('pain_level = ?'); values.push(data.pain_level); }
+  if (data.feasibility !== undefined) { fields.push('feasibility = ?'); values.push(data.feasibility); }
+  if (data.founder_fit !== undefined) { fields.push('founder_fit = ?'); values.push(data.founder_fit); }
+  if (data.revenue_potential !== undefined) { fields.push('revenue_potential = ?'); values.push(data.revenue_potential); }
+  if (data.execution_difficulty !== undefined) { fields.push('execution_difficulty = ?'); values.push(data.execution_difficulty); }
+  if (data.go_to_market !== undefined) { fields.push('go_to_market = ?'); values.push(data.go_to_market); }
+  if (data.pricing !== undefined) { fields.push('pricing = ?'); values.push(data.pricing); }
+  if (data.target_market !== undefined) { fields.push('target_market = ?'); values.push(data.target_market); }
+  if (data.competition !== undefined) { fields.push('competition = ?'); values.push(data.competition); }
+  if (data.raw_data !== undefined) { fields.push('raw_data = ?'); values.push(data.raw_data); }
+  if (data.sync_status !== undefined) { fields.push('sync_status = ?'); values.push(data.sync_status); }
+  if (data.project_id !== undefined) { fields.push('project_id = ?'); values.push(data.project_id); }
+
+  if (fields.length === 0) return existing;
+
+  fields.push("updated_at = datetime('now')");
+  values.push(id);
+  getDb().prepare(`UPDATE ideabrowser_ideas SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  return getIdeaBrowserIdea(id);
+}
+
+export function deleteIdeaBrowserIdea(id: string): boolean {
+  const result = getDb().prepare('DELETE FROM ideabrowser_ideas WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+export function bulkImportIdeaBrowserIdeas(ideas: Array<{
+  title: string;
+  description?: string;
+  source_url?: string;
+  category?: string;
+  tags?: string;
+  search_volume?: string;
+  growth_rate?: string;
+  pain_level?: string;
+  feasibility?: string;
+  founder_fit?: string;
+  revenue_potential?: string;
+  execution_difficulty?: string;
+  go_to_market?: string;
+  pricing?: string;
+  target_market?: string;
+  competition?: string;
+  raw_data?: string;
+  sync_status?: string;
+}>): { imported: IdeaBrowserIdea[]; skipped: number } {
+  const db = getDb();
+  const insert = db.prepare(`
+    INSERT INTO ideabrowser_ideas (id, title, description, source_url, category, tags, search_volume, growth_rate, pain_level, feasibility, founder_fit, revenue_potential, execution_difficulty, go_to_market, pricing, target_market, competition, raw_data, sync_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const checkExisting = db.prepare('SELECT id FROM ideabrowser_ideas WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) LIMIT 1');
+
+  const imported: IdeaBrowserIdea[] = [];
+  let skipped = 0;
+
+  const tx = db.transaction(() => {
+    for (const idea of ideas) {
+      if (!idea.title) { skipped++; continue; }
+      // Deduplicate by normalized title
+      const existing = checkExisting.get(idea.title);
+      if (existing) { skipped++; continue; }
+      const id = uuidv4();
+      insert.run(
+        id, idea.title, idea.description || null, idea.source_url || null,
+        idea.category || null, idea.tags || null, idea.search_volume || null,
+        idea.growth_rate || null, idea.pain_level || null, idea.feasibility || null,
+        idea.founder_fit || null, idea.revenue_potential || null, idea.execution_difficulty || null,
+        idea.go_to_market || null, idea.pricing || null, idea.target_market || null,
+        idea.competition || null, idea.raw_data || null, idea.sync_status || 'scraped',
+      );
+      imported.push(getIdeaBrowserIdea(id)!);
+    }
+  });
+
+  tx();
+  return { imported, skipped };
+}
+
+export function linkIdeaToProject(ideaId: string, projectId: string): boolean {
+  const result = getDb().prepare("UPDATE ideabrowser_ideas SET project_id = ?, updated_at = datetime('now') WHERE id = ?").run(projectId, ideaId);
+  return result.changes > 0;
+}
+
+export function getIdeaBrowserConfig(): Record<string, string> {
+  const rows = getDb().prepare('SELECT key, value FROM ideabrowser_config').all() as { key: string; value: string }[];
+  const config: Record<string, string> = {};
+  for (const row of rows) config[row.key] = row.value;
+  return config;
+}
+
+export function setIdeaBrowserConfig(key: string, value: string): void {
+  getDb().prepare('INSERT OR REPLACE INTO ideabrowser_config (key, value) VALUES (?, ?)').run(key, value);
+}
+
+export function getIdeaBrowserIdeaCount(): number {
+  const row = getDb().prepare('SELECT COUNT(*) as cnt FROM ideabrowser_ideas').get() as { cnt: number };
+  return row.cnt;
 }

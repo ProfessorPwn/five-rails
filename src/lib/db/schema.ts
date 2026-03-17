@@ -128,6 +128,111 @@ function initSchema(db: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS platform_connections (
+      id TEXT PRIMARY KEY,
+      platform TEXT NOT NULL CHECK(platform IN ('twitter', 'linkedin', 'facebook', 'instagram', 'tiktok', 'youtube', 'email')),
+      label TEXT,
+      api_key TEXT,
+      api_secret TEXT,
+      access_token TEXT,
+      access_token_secret TEXT,
+      refresh_token TEXT,
+      token_expires_at TEXT,
+      account_id TEXT,
+      username TEXT,
+      profile_image TEXT,
+      smtp_host TEXT,
+      smtp_port INTEGER,
+      smtp_user TEXT,
+      smtp_pass TEXT,
+      from_email TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Migration: add action_plan column to projects
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN action_plan TEXT`);
+  } catch {
+    // Column already exists
+  }
+
+  // Migration: add OAuth fields to platform_connections
+  for (const col of ['refresh_token', 'token_expires_at', 'username', 'profile_image']) {
+    try { db.exec(`ALTER TABLE platform_connections ADD COLUMN ${col} TEXT`); } catch { /* exists */ }
+  }
+
+  // Migration: add published_url and published_at columns to content_pieces
+  try {
+    db.exec(`ALTER TABLE content_pieces ADD COLUMN published_url TEXT`);
+  } catch {
+    // Column already exists
+  }
+  try {
+    db.exec(`ALTER TABLE content_pieces ADD COLUMN published_at TEXT`);
+  } catch {
+    // Column already exists
+  }
+
+  // Newsletters table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS newsletters (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      title TEXT NOT NULL,
+      subject TEXT,
+      content TEXT,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'generating', 'ready', 'sent')),
+      newsletter_type TEXT DEFAULT 'weekly' CHECK(newsletter_type IN ('weekly', 'monthly', 'roundup', 'announcement', 'educational', 'promotional')),
+      recipients TEXT,
+      sent_at TEXT,
+      sent_count INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+    )
+  `);
+
+  // IdeaBrowser tables
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ideabrowser_ideas (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      source_url TEXT,
+      category TEXT,
+      tags TEXT,
+      search_volume TEXT,
+      growth_rate TEXT,
+      pain_level TEXT,
+      feasibility TEXT,
+      founder_fit TEXT,
+      revenue_potential TEXT,
+      execution_difficulty TEXT,
+      go_to_market TEXT,
+      pricing TEXT,
+      target_market TEXT,
+      competition TEXT,
+      raw_data TEXT,
+      sync_status TEXT NOT NULL DEFAULT 'scraped',
+      project_id TEXT,
+      imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS ideabrowser_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+
+  db.exec(`
+    INSERT OR IGNORE INTO ideabrowser_config (key, value) VALUES ('last_sync_at', '');
+    INSERT OR IGNORE INTO ideabrowser_config (key, value) VALUES ('sync_enabled', '1');
+    INSERT OR IGNORE INTO ideabrowser_config (key, value) VALUES ('auto_sync_interval', '24');
   `);
 
   seedSkills(db);

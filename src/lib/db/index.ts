@@ -924,10 +924,46 @@ export interface IdeaBrowserIdea {
   target_market: string | null;
   competition: string | null;
   raw_data: string | null;
+  product_urgency: string | null;
+  market_gap: string | null;
+  execution_plan: string | null;
+  idea_date: string | null;
+  search_volume_score: number;
+  growth_rate_score: number;
+  pain_level_score: number;
+  feasibility_score: number;
+  revenue_potential_score: number;
+  overall_score: number;
+  google_trends_data: string | null;
   sync_status: 'scraped' | 'manual' | 'modified';
   project_id: string | null;
   imported_at: string;
   updated_at: string;
+}
+
+export interface IdeaBrowserTrend {
+  id: string;
+  title: string;
+  category: string | null;
+  growth_pct: number;
+  sparkline_data: string | null;
+  search_volume: number;
+  timeframe: string;
+  source: string;
+  created_at: string;
+}
+
+export interface IdeaBrowserMarketInsight {
+  id: string;
+  title: string;
+  description: string | null;
+  category: string | null;
+  metric_label: string | null;
+  metric_value: string | null;
+  trend_direction: 'up' | 'down' | 'flat' | null;
+  source: string | null;
+  sparkline_data: string | null;
+  created_at: string;
 }
 
 export function getIdeaBrowserIdeas(): IdeaBrowserIdea[] {
@@ -1104,4 +1140,118 @@ export function setIdeaBrowserConfig(key: string, value: string): void {
 export function getIdeaBrowserIdeaCount(): number {
   const row = getDb().prepare('SELECT COUNT(*) as cnt FROM ideabrowser_ideas').get() as { cnt: number };
   return row.cnt;
+}
+
+export function getIdeaOfTheDay(): IdeaBrowserIdea | undefined {
+  // Get the most recently imported idea, or one matching today's date
+  return getDb().prepare(
+    `SELECT * FROM ideabrowser_ideas ORDER BY idea_date DESC, imported_at DESC LIMIT 1`
+  ).get() as IdeaBrowserIdea | undefined;
+}
+
+export function getIdeaBrowserIdeasPaginated(opts: {
+  page?: number;
+  perPage?: number;
+  search?: string;
+  category?: string;
+  sortBy?: string;
+}): { ideas: IdeaBrowserIdea[]; total: number } {
+  const page = opts.page || 1;
+  const perPage = opts.perPage || 48;
+  const offset = (page - 1) * perPage;
+
+  let where = '1=1';
+  const params: unknown[] = [];
+
+  if (opts.search) {
+    where += ' AND (LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(tags) LIKE ?)';
+    const s = `%${opts.search.toLowerCase()}%`;
+    params.push(s, s, s);
+  }
+  if (opts.category) {
+    where += ' AND LOWER(category) = ?';
+    params.push(opts.category.toLowerCase());
+  }
+
+  let orderBy = 'imported_at DESC';
+  if (opts.sortBy === 'score') orderBy = 'overall_score DESC';
+  else if (opts.sortBy === 'pain') orderBy = 'pain_level_score DESC';
+  else if (opts.sortBy === 'revenue') orderBy = 'revenue_potential_score DESC';
+  else if (opts.sortBy === 'newest') orderBy = 'idea_date DESC, imported_at DESC';
+  else if (opts.sortBy === 'category') orderBy = 'category ASC, title ASC';
+
+  const total = (getDb().prepare(`SELECT COUNT(*) as cnt FROM ideabrowser_ideas WHERE ${where}`).get(...params) as { cnt: number }).cnt;
+  const ideas = getDb().prepare(`SELECT * FROM ideabrowser_ideas WHERE ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...params, perPage, offset) as IdeaBrowserIdea[];
+
+  return { ideas, total };
+}
+
+export function getIdeaBrowserCategories(): { category: string; count: number }[] {
+  return getDb().prepare(
+    `SELECT category, COUNT(*) as count FROM ideabrowser_ideas WHERE category IS NOT NULL AND category != '' GROUP BY category ORDER BY count DESC`
+  ).all() as { category: string; count: number }[];
+}
+
+// Trends
+export function getIdeaBrowserTrends(): IdeaBrowserTrend[] {
+  return getDb().prepare('SELECT * FROM ideabrowser_trends ORDER BY growth_pct DESC').all() as IdeaBrowserTrend[];
+}
+
+export function upsertIdeaBrowserTrend(data: Omit<IdeaBrowserTrend, 'created_at'>): void {
+  getDb().prepare(`
+    INSERT OR REPLACE INTO ideabrowser_trends (id, title, category, growth_pct, sparkline_data, search_volume, timeframe, source)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(data.id, data.title, data.category || null, data.growth_pct, data.sparkline_data || null, data.search_volume, data.timeframe, data.source);
+}
+
+// Market Insights
+export function getIdeaBrowserMarketInsights(): IdeaBrowserMarketInsight[] {
+  return getDb().prepare('SELECT * FROM ideabrowser_market_insights ORDER BY created_at DESC').all() as IdeaBrowserMarketInsight[];
+}
+
+export function upsertIdeaBrowserMarketInsight(data: Omit<IdeaBrowserMarketInsight, 'created_at'>): void {
+  getDb().prepare(`
+    INSERT OR REPLACE INTO ideabrowser_market_insights (id, title, description, category, metric_label, metric_value, trend_direction, source, sparkline_data)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(data.id, data.title, data.description || null, data.category || null, data.metric_label || null, data.metric_value || null, data.trend_direction || null, data.source || null, data.sparkline_data || null);
+}
+
+// Scoring engine - compute scores from text fields
+export function scoreIdeaBrowserIdea(id: string): IdeaBrowserIdea | undefined {
+  const idea = getIdeaBrowserIdea(id);
+  if (!idea) return undefined;
+
+  const textToScore = (text: string | null, highKeywords: string[], lowKeywords: string[]): number => {
+    if (!text) return 50;
+    const t = text.toLowerCase();
+    for (const k of highKeywords) if (t.includes(k)) return 85;
+    for (const k of lowKeywords) if (t.includes(k)) return 30;
+    return 60;
+  };
+
+  const sv = textToScore(idea.search_volume, ['high', 'strong', '10k', '50k', '100k'], ['low', 'minimal', 'niche']);
+  const gr = textToScore(idea.growth_rate, ['high', 'rapid', 'surging', 'explosive', '50%', '100%'], ['low', 'declining', 'flat', 'stagnant']);
+  const pl = textToScore(idea.pain_level, ['high', 'severe', 'critical', 'acute', 'extreme'], ['low', 'mild', 'minimal']);
+  const fe = textToScore(idea.feasibility, ['high', 'easy', 'straightforward', 'proven'], ['low', 'complex', 'difficult', 'hard']);
+  const rp = textToScore(idea.revenue_potential, ['high', 'massive', 'large', 'significant', '$1m', '$10m'], ['low', 'small', 'limited', 'niche']);
+
+  const overall = Math.round((sv + gr + pl + fe + rp) / 5);
+
+  getDb().prepare(`
+    UPDATE ideabrowser_ideas
+    SET search_volume_score = ?, growth_rate_score = ?, pain_level_score = ?, feasibility_score = ?, revenue_potential_score = ?, overall_score = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(sv, gr, pl, fe, rp, overall, id);
+
+  return getIdeaBrowserIdea(id);
+}
+
+export function scoreAllIdeaBrowserIdeas(): number {
+  const ideas = getIdeaBrowserIdeas();
+  let scored = 0;
+  for (const idea of ideas) {
+    scoreIdeaBrowserIdea(idea.id);
+    scored++;
+  }
+  return scored;
 }

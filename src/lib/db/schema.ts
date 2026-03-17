@@ -235,6 +235,54 @@ function initSchema(db: Database.Database): void {
     INSERT OR IGNORE INTO ideabrowser_config (key, value) VALUES ('auto_sync_interval', '24');
   `);
 
+  // Migration: add analysis columns to ideabrowser_ideas
+  for (const col of [
+    'product_urgency TEXT',
+    'market_gap TEXT',
+    'execution_plan TEXT',
+    'idea_date TEXT',
+    'search_volume_score INTEGER DEFAULT 0',
+    'growth_rate_score INTEGER DEFAULT 0',
+    'pain_level_score INTEGER DEFAULT 0',
+    'feasibility_score INTEGER DEFAULT 0',
+    'revenue_potential_score INTEGER DEFAULT 0',
+    'overall_score INTEGER DEFAULT 0',
+    'google_trends_data TEXT',
+  ]) {
+    try { db.exec(`ALTER TABLE ideabrowser_ideas ADD COLUMN ${col}`); } catch { /* exists */ }
+  }
+
+  // IdeaBrowser trends table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ideabrowser_trends (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      category TEXT,
+      growth_pct REAL DEFAULT 0,
+      sparkline_data TEXT,
+      search_volume INTEGER DEFAULT 0,
+      timeframe TEXT DEFAULT 'monthly',
+      source TEXT DEFAULT 'ideabrowser',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  // IdeaBrowser market insights table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ideabrowser_market_insights (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      category TEXT,
+      metric_label TEXT,
+      metric_value TEXT,
+      trend_direction TEXT CHECK(trend_direction IN ('up', 'down', 'flat')),
+      source TEXT,
+      sparkline_data TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   seedSkills(db);
 }
 

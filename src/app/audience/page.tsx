@@ -18,6 +18,8 @@ interface ContentPiece {
   project_id?: string;
   scheduled_at?: string;
   created_at: string;
+  published_url?: string | null;
+  published_at?: string | null;
 }
 
 interface Project {
@@ -28,7 +30,7 @@ interface Project {
 type ViewMode = "grid" | "calendar";
 
 const contentTypes = ["post", "email", "script", "lead_magnet", "landing_page"];
-const platforms = ["Twitter", "LinkedIn", "Blog", "Email", "YouTube", "TikTok", "Other"];
+const platforms = ["Twitter", "LinkedIn", "Facebook", "Instagram", "TikTok", "YouTube", "Email"];
 const statuses = ["draft", "scheduled", "published", "archived"];
 
 const typeColors: Record<string, "amber" | "blue" | "emerald" | "violet" | "rose"> = {
@@ -58,6 +60,8 @@ export default function AudiencePage() {
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [error, setError] = useState("");
+  const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [publishResult, setPublishResult] = useState<{ success: boolean; message: string } | null>(null);
   const [editingContent, setEditingContent] = useState<ContentPiece | null>(null);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -177,6 +181,29 @@ export default function AudiencePage() {
     }
   };
 
+  const handlePublish = async (piece: ContentPiece) => {
+    if (!piece.platform || !["Twitter", "LinkedIn", "Facebook", "Instagram", "TikTok", "YouTube", "Email"].includes(piece.platform)) {
+      setError(`Cannot publish to "${piece.platform}". Supported platforms: Twitter, LinkedIn, Facebook, Instagram, TikTok, YouTube, Email.`);
+      return;
+    }
+    setPublishingId(piece.id);
+    setPublishResult(null);
+    try {
+      const res = await fetch(`/api/content/${piece.id}/publish`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setPublishResult({ success: true, message: `Published to ${piece.platform}${data.published_url ? ` - ${data.published_url}` : ""}` });
+        fetchData();
+      } else {
+        setPublishResult({ success: false, message: data.error || "Publishing failed" });
+      }
+    } catch {
+      setPublishResult({ success: false, message: "Network error while publishing" });
+    } finally {
+      setPublishingId(null);
+    }
+  };
+
   const filtered = content.filter((c) => {
     if (filterProject !== "all" && c.project_id !== filterProject) return false;
     if (filterType !== "all" && c.type !== filterType) return false;
@@ -280,6 +307,14 @@ export default function AudiencePage() {
         </div>
       )}
 
+      {/* Publish Result */}
+      {publishResult && (
+        <div className={`${publishResult.success ? "bg-emerald-500/10 border-emerald-500/30" : "bg-red-500/10 border-red-500/30"} border rounded-lg px-4 py-3 flex items-center justify-between`}>
+          <span className={`text-sm ${publishResult.success ? "text-emerald-400" : "text-red-400"}`}>{publishResult.message}</span>
+          <button onClick={() => setPublishResult(null)} className={`${publishResult.success ? "text-emerald-400 hover:text-emerald-300" : "text-red-400 hover:text-red-300"} cursor-pointer text-sm`}>&#x2715;</button>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="flex items-center gap-3">
         <div className="flex-1">
@@ -365,6 +400,49 @@ export default function AudiencePage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* Publish button - show for all connected platforms */}
+                    {piece.status !== "published" && piece.platform && ["Twitter", "LinkedIn", "Facebook", "Instagram", "TikTok", "YouTube", "Email"].includes(piece.platform) && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handlePublish(piece); }}
+                        disabled={publishingId === piece.id}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {publishingId === piece.id ? (
+                          <div className="animate-spin rounded-full h-2.5 w-2.5 border border-amber-400 border-t-transparent" />
+                        ) : (
+                          <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
+                            <path d="M2 12L12 2M12 2H5M12 2v7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                        {publishingId === piece.id ? "Publishing..." : "Publish"}
+                      </button>
+                    )}
+                    {piece.status === "published" && (
+                      piece.published_url ? (
+                        <a
+                          href={piece.published_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
+                        >
+                          <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
+                            <path d="M2 7l4 4 6-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          View Live
+                          <svg width="8" height="8" viewBox="0 0 14 14" fill="none">
+                            <path d="M4 10L10 4M10 4H5M10 4v5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </a>
+                      ) : (
+                        <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                          <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
+                            <path d="M2 7l4 4 6-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          Published{piece.published_at ? ` ${new Date(piece.published_at).toLocaleDateString()}` : ""}
+                        </span>
+                      )
+                    )}
                     <span className="text-[10px] text-[#64748b]">
                       {new Date(piece.created_at).toLocaleDateString()}
                     </span>
@@ -414,19 +492,31 @@ export default function AudiencePage() {
                         <div
                           key={piece.id}
                           onClick={() => openEditModal(piece)}
-                          className={`text-[10px] px-1.5 py-0.5 rounded truncate cursor-pointer hover:brightness-125 transition-all ${
-                            typeColors[piece.type] === "blue"
-                              ? "bg-blue-500/10 text-blue-400"
-                              : typeColors[piece.type] === "violet"
-                                ? "bg-violet-500/10 text-violet-400"
-                                : typeColors[piece.type] === "emerald"
-                                  ? "bg-emerald-500/10 text-emerald-400"
-                                  : typeColors[piece.type] === "rose"
-                                    ? "bg-rose-500/10 text-rose-400"
-                                    : "bg-amber-500/10 text-amber-400"
+                          className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer hover:brightness-125 transition-all ${
+                            piece.status === "published"
+                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              : typeColors[piece.type] === "blue"
+                                ? "bg-blue-500/10 text-blue-400"
+                                : typeColors[piece.type] === "violet"
+                                  ? "bg-violet-500/10 text-violet-400"
+                                  : typeColors[piece.type] === "emerald"
+                                    ? "bg-emerald-500/10 text-emerald-400"
+                                    : typeColors[piece.type] === "rose"
+                                      ? "bg-rose-500/10 text-rose-400"
+                                      : "bg-amber-500/10 text-amber-400"
                           }`}
                         >
-                          {piece.title}
+                          <div className="truncate">{piece.title}</div>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            {piece.status === "published" && (
+                              <svg width="7" height="7" viewBox="0 0 14 14" fill="none" className="flex-shrink-0">
+                                <path d="M2 7l4 4 6-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            )}
+                            <span className="truncate opacity-70">
+                              {piece.platform}{piece.status === "published" ? " · Live" : piece.status === "scheduled" ? " · Scheduled" : ""}
+                            </span>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -557,10 +647,51 @@ export default function AudiencePage() {
               onChange={(e) => setEditForm({ ...editForm, scheduled_at: e.target.value })}
             />
           )}
+          {editingContent?.status === "published" && (
+            <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3 space-y-1">
+              <div className="flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M2 7l4 4 6-8" stroke="#34d399" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span className="text-xs font-medium text-emerald-400">
+                  Published to {editingContent.platform}
+                  {editingContent.published_at && ` on ${new Date(editingContent.published_at).toLocaleString()}`}
+                </span>
+              </div>
+              {editingContent.published_url && (
+                <a
+                  href={editingContent.published_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-emerald-400/80 hover:text-emerald-300 underline underline-offset-2 flex items-center gap-1"
+                >
+                  {editingContent.published_url}
+                  <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
+                    <path d="M4 10L10 4M10 4H5M10 4v5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </a>
+              )}
+            </div>
+          )}
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="ghost" type="button" onClick={() => setEditingContent(null)}>
               Cancel
             </Button>
+            {editingContent && editingContent.status !== "published" && editingContent.platform && ["Twitter", "LinkedIn", "Facebook", "Instagram", "TikTok", "YouTube", "Email"].includes(editingContent.platform) && (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={publishingId === editingContent.id}
+                onClick={() => {
+                  if (editingContent) {
+                    handlePublish(editingContent);
+                    setEditingContent(null);
+                  }
+                }}
+              >
+                {publishingId === editingContent.id ? "Publishing..." : `Publish to ${editingContent.platform}`}
+              </Button>
+            )}
             <Button type="submit" disabled={editing || !editForm.title.trim()}>
               {editing ? "Saving..." : "Save Changes"}
             </Button>

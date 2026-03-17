@@ -19,7 +19,21 @@ interface Project {
   target_audience: string;
   score: number;
   status: string;
+  action_plan: string | null;
   created_at: string;
+}
+
+interface ActionPlanStep {
+  id: string;
+  label: string;
+  desc: string;
+  actionType: "define-niche" | "define-offer" | "add-contacts" | "skill";
+  skillId?: string;
+  skillName?: string;
+  promptContext?: string;
+  badge: string;
+  badgeVariant: "default" | "info" | "warning" | "rose" | "amber";
+  saveAs?: "insight" | "landing_page" | "email" | "post" | "lead_magnet" | "script";
 }
 
 interface Task {
@@ -61,6 +75,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [contacts, setContacts] = useState<{ id: string; name: string; status: string }[]>([]);
   const [contentPieces, setContentPieces] = useState<{ id: string; type: string; title: string }[]>([]);
   const [projectInsights, setProjectInsights] = useState<{ id: string; title: string; category: string | null }[]>([]);
+  const [ideaBrowserIdeas, setIdeaBrowserIdeas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -98,6 +113,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   // Toggling task status (track in-flight toggles)
   const [togglingTaskIds, setTogglingTaskIds] = useState<Set<string>>(new Set());
 
+  // Dynamic action plan
+  const [actionPlan, setActionPlan] = useState<ActionPlanStep[]>([]);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
+
   // Recommended action execution
   const [runningAction, setRunningAction] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<{
@@ -105,9 +124,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     title: string;
     output: string;
     skillName: string;
+    saveAs?: string;
   } | null>(null);
   const [savingResult, setSavingResult] = useState(false);
   const [resultSaved, setResultSaved] = useState(false);
+  const [savedActionContentId, setSavedActionContentId] = useState<string | null>(null);
+  const [publishingAction, setPublishingAction] = useState(false);
 
   // Add contact form (for the outbound recommended action)
   const [showAddContact, setShowAddContact] = useState(false);
@@ -119,6 +141,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     if (res.ok) {
       const data = await res.json();
       setProject(data);
+      // Load stored action plan
+      if (data.action_plan) {
+        try {
+          const plan = JSON.parse(data.action_plan);
+          if (Array.isArray(plan)) setActionPlan(plan);
+        } catch { /* ignore parse errors */ }
+      }
       return data;
     }
     return null;
@@ -149,28 +178,53 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       fetch(`/api/outbound?project_id=${id}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
       fetch(`/api/content?project_id=${id}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
       fetch("/api/insights").then((r) => (r.ok ? r.json() : [])).catch(() => []),
-    ]).then(([, , , sk, cts, cnt, ins]) => {
+      fetch(`/api/ideabrowser/ideas?project_id=${id}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+    ]).then(([, , , sk, cts, cnt, ins, ib]) => {
       setSkills(Array.isArray(sk) ? sk : []);
       setContacts(Array.isArray(cts) ? cts : []);
       setContentPieces(Array.isArray(cnt) ? cnt : []);
       setProjectInsights(
         (Array.isArray(ins) ? ins : []).filter((i: any) => i.project_id === id)
       );
+      setIdeaBrowserIdeas(Array.isArray(ib) ? ib : []);
       setLoading(false);
     });
   }, [fetchProject, fetchTasks, fetchActivity, id]);
 
   // Refresh data that drives step completion
   const refreshStepData = useCallback(async () => {
-    const [cts, cnt, ins] = await Promise.all([
+    const [cts, cnt, ins, tsk] = await Promise.all([
       fetch(`/api/outbound?project_id=${id}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
       fetch(`/api/content?project_id=${id}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
       fetch("/api/insights").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch(`/api/tasks?project_id=${id}`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
     ]);
     setContacts(Array.isArray(cts) ? cts : []);
     setContentPieces(Array.isArray(cnt) ? cnt : []);
     setProjectInsights((Array.isArray(ins) ? ins : []).filter((i: any) => i.project_id === id));
+    setTasks(Array.isArray(tsk) ? tsk : []);
   }, [id]);
+
+  // Generate context-aware action plan from project summary
+  const handleGeneratePlan = async () => {
+    setGeneratingPlan(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/projects/${id}/generate-plan`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error + (data.hint ? ` ${data.hint}` : ""));
+        return;
+      }
+      if (Array.isArray(data.plan)) {
+        setActionPlan(data.plan);
+      }
+    } catch {
+      setError("Failed to generate action plan");
+    } finally {
+      setGeneratingPlan(false);
+    }
+  };
 
   // Open edit modal -- populate form with current project data
   const openEditModal = () => {
@@ -204,7 +258,15 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       });
       if (res.ok) {
         const updated = await res.json();
+        // If niche, audience, or description changed, invalidate the action plan
+        const contextChanged =
+          updated.niche !== project?.niche ||
+          updated.target_audience !== project?.target_audience ||
+          updated.description !== project?.description;
         setProject(updated);
+        if (contextChanged && actionPlan.length > 0) {
+          setActionPlan([]);
+        }
         setShowEditProject(false);
       } else {
         setError("Failed to update project");
@@ -272,7 +334,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         setTaskForm({ title: "", description: "" });
         setShowCreateTask(false);
         await fetchTasks();
+      } else {
+        setError("Failed to create task");
       }
+    } catch {
+      setError("Failed to create task");
     } finally {
       setCreatingTask(false);
     }
@@ -331,100 +397,52 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     }
   };
 
-  // ── Recommended Action Handlers ──────────────────────────────────────────
+  // ── Recommended Action Handlers (dynamic, plan-driven) ──────────────────
 
-  const actionConfig: Record<string, { skillId: string; buildInput: (p: Project) => string }> = {
-    "competitive-analysis": {
-      skillId: "skill-competitive-intel",
-      buildInput: (p) => [
-        `Analyze the competitive landscape for: ${p.niche || p.name}`,
-        p.target_audience ? `Target audience: ${p.target_audience}` : "",
-        p.description ? `Context: ${p.description}` : "",
-      ].filter(Boolean).join("\n"),
-    },
-    "landing-page": {
-      skillId: "skill-sales-page-surgeon",
-      buildInput: (p) => [
-        `Create a high-converting landing page for: ${p.name}`,
-        p.niche ? `Niche: ${p.niche}` : "",
-        p.target_audience ? `Target audience: ${p.target_audience}` : "",
-        p.description ? `Description: ${p.description}` : "",
-      ].filter(Boolean).join("\n"),
-    },
-    "market-research": {
-      skillId: "skill-market-research",
-      buildInput: (p) => [
-        `Conduct comprehensive market research for: ${p.niche || p.name}`,
-        p.target_audience ? `Target audience: ${p.target_audience}` : "",
-        p.description ? `Context: ${p.description}` : "",
-        "Focus on: current market trends, emerging competitors, underserved segments, and actionable opportunities.",
-      ].filter(Boolean).join("\n"),
-    },
-    "outbound-sequence": {
-      skillId: "skill-outbound-sequence",
-      buildInput: (p) => [
-        `Build an outbound sequence for: ${p.name}`,
-        p.niche ? `Niche: ${p.niche}` : "",
-        p.target_audience ? `Target audience: ${p.target_audience}` : "",
-        p.description ? `Offer: ${p.description}` : "",
-      ].filter(Boolean).join("\n"),
-    },
-    "content-strategy": {
-      skillId: "skill-content-engine",
-      buildInput: (p) => [
-        `Create a multi-platform content strategy for: ${p.name}`,
-        p.niche ? `Niche: ${p.niche}` : "",
-        p.target_audience ? `Target audience: ${p.target_audience}` : "",
-        p.description ? `About: ${p.description}` : "",
-        "Produce a blog post, Twitter/X thread, LinkedIn post, and newsletter edition.",
-      ].filter(Boolean).join("\n"),
-    },
-  };
-
-  const actionTitles: Record<string, (p: Project) => string> = {
-    "competitive-analysis": (p) => `Competitive Analysis: ${p.niche || p.name}`,
-    "landing-page": (p) => `Landing Page Draft: ${p.name}`,
-    "market-research": (p) => `Market Research: ${p.niche || p.name}`,
-    "outbound-sequence": (p) => `Outbound Sequence: ${p.name}`,
-    "content-strategy": (p) => `Content Strategy: ${p.name}`,
-  };
-
-  const handleRunAction = async (actionId: string) => {
+  const handleRunAction = async (stepId: string) => {
     if (!project) return;
 
-    if (actionId === "define-niche" || actionId === "define-offer") {
+    const step = actionPlan.find((s) => s.id === stepId);
+    if (!step) return;
+
+    // Built-in actions
+    if (step.actionType === "define-niche" || step.actionType === "define-offer") {
       openEditModal();
       return;
     }
-
-    if (actionId === "add-contacts") {
+    if (step.actionType === "add-contacts") {
       setContactForm({ name: "", email: "", company: "", role: "", notes: "" });
       setShowAddContact(true);
       return;
     }
 
-    const config = actionConfig[actionId];
-    if (!config) return;
+    // Skill execution
+    if (step.actionType !== "skill" || !step.skillId) return;
 
-    setRunningAction(actionId);
+    setRunningAction(stepId);
     setActionResult(null);
     setResultSaved(false);
 
+    // Build input from the step's promptContext (generated by LLM to match THIS project)
+    const input = step.promptContext || [
+      step.label,
+      project.niche ? `Niche: ${project.niche}` : "",
+      project.target_audience ? `Target audience: ${project.target_audience}` : "",
+      project.description ? `Context: ${project.description}` : "",
+    ].filter(Boolean).join("\n");
+
     try {
-      const res = await fetch(`/api/skills/${config.skillId}/execute`, {
+      const res = await fetch(`/api/skills/${step.skillId}/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project_id: id,
-          input: config.buildInput(project),
-        }),
+        body: JSON.stringify({ project_id: id, input }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
         setActionResult({
-          actionId,
+          actionId: stepId,
           title: "Error",
           output: data.error + (data.hint ? `\n\n${data.hint}` : ""),
           skillName: "",
@@ -433,16 +451,17 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       }
 
       setActionResult({
-        actionId,
-        title: actionTitles[actionId]?.(project) || "Result",
+        actionId: stepId,
+        title: `${step.label}: ${project.name}`,
         output: data.output || "",
         skillName: data.skill_name || "",
+        saveAs: step.saveAs,
       });
 
       fetchActivity();
     } catch {
       setActionResult({
-        actionId,
+        actionId: stepId,
         title: "Error",
         output: "Failed to connect to the skill execution endpoint.",
         skillName: "",
@@ -457,17 +476,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     setSavingResult(true);
 
     try {
-      const results: Response[] = [];
+      const saveAs = actionResult.saveAs || "insight";
 
-      // Map action types to save targets
-      const saveAsInsight = ["competitive-analysis", "market-research"];
-      const saveAsContent: Record<string, string> = {
-        "landing-page": "landing_page",
-        "outbound-sequence": "email",
-        "content-strategy": "post",
-      };
-
-      if (saveAsInsight.includes(actionResult.actionId)) {
+      if (saveAs === "insight") {
+        // Save as market insight
         const res = await fetch("/api/insights", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -475,50 +487,85 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             title: actionResult.title,
             description: actionResult.output,
             source: actionResult.skillName,
-            category: actionResult.actionId === "competitive-analysis" ? "competitive_analysis" : "market_research",
+            category: "analysis",
             project_id: id,
           }),
         });
-        results.push(res);
-        if (actionResult.actionId === "market-research") {
-          const res2 = await fetch("/api/tasks", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              project_id: id,
-              title: "Review market changes and update analysis",
-              description: `Re-run market research for "${project.niche || project.name}" to track shifts in the competitive landscape.`,
-            }),
-          });
-          results.push(res2);
-          fetchTasks();
+        if (!res.ok) {
+          setError("Failed to save insight.");
+          return;
         }
-      } else if (saveAsContent[actionResult.actionId]) {
+      } else {
+        // Save as content piece (landing_page, email, post, lead_magnet, script)
+        // Map saveAs type to default platform
+        const platformMap: Record<string, string> = {
+          post: "Twitter",
+          email: "Email",
+          landing_page: "Blog",
+          lead_magnet: "Blog",
+          script: "YouTube",
+        };
         const res = await fetch("/api/content", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            type: saveAsContent[actionResult.actionId],
+            type: saveAs,
             title: actionResult.title,
             content: actionResult.output,
+            platform: platformMap[saveAs] || "Blog",
             project_id: id,
           }),
         });
-        results.push(res);
+        if (!res.ok) {
+          setError("Failed to save content.");
+          return;
+        }
+        const savedContent = await res.json();
+        // Track the saved content ID for potential publishing
+        if (savedContent.id && ["post", "email"].includes(saveAs)) {
+          setSavedActionContentId(savedContent.id);
+        }
       }
 
-      const failed = results.filter((r) => !r.ok);
-      if (failed.length > 0) {
-        setError("Failed to save some results. Please try again.");
-      } else {
-        setResultSaved(true);
-      }
+      // Log activity for the save — this is what drives step completion
+      await fetch("/api/activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: id,
+          action: "result_saved",
+          details: `Saved ${saveAs} from ${actionResult.skillName}: ${actionResult.title}`,
+          skill_used: actionResult.skillName,
+        }),
+      });
+
+      setResultSaved(true);
       fetchActivity();
       refreshStepData();
     } catch {
       setError("Failed to save action result");
     } finally {
       setSavingResult(false);
+    }
+  };
+
+  const handlePublishActionContent = async () => {
+    if (!savedActionContentId) return;
+    setPublishingAction(true);
+    try {
+      const res = await fetch(`/api/content/${savedActionContentId}/publish`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setActionResult(null);
+        setSavedActionContentId(null);
+        refreshStepData();
+      } else {
+        setError(data.error || "Publishing failed");
+      }
+    } catch {
+      setError("Network error while publishing");
+    } finally {
+      setPublishingAction(false);
     }
   };
 
@@ -640,6 +687,28 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <Button size="sm" variant="secondary" onClick={async () => {
+            try {
+              const res = await fetch("/api/newsletters", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  title: `${project.name} — Update`,
+                  newsletter_type: "weekly",
+                  project_id: id,
+                }),
+              });
+              if (res.ok) {
+                router.push("/newsletters");
+              }
+            } catch { /* ignore */ }
+          }}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <rect x="1.5" y="3" width="11" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M1.5 5.5l5.5 3 5.5-3" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+            </svg>
+            Newsletter
+          </Button>
           <Button size="sm" variant="secondary" onClick={openEditModal}>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M10.5 1.5l2 2-8 8H2.5v-2l8-8z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
@@ -763,99 +832,98 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               </div>
             </div>
 
-            {/* Guided Action Plan */}
+            {/* IdeaBrowser Ideas */}
+            {ideaBrowserIdeas.length > 0 && (
+              <div>
+                <h2 className="text-sm font-semibold text-[#94a3b8] uppercase tracking-wider mb-3">
+                  IdeaBrowser Ideas
+                </h2>
+                <div className="grid grid-cols-2 gap-3">
+                  {ideaBrowserIdeas.map((idea: any) => (
+                    <Card key={idea.id} hover={false} className="!p-3">
+                      <h4 className="text-sm font-medium text-[#e2e8f0] mb-1">{idea.title}</h4>
+                      {idea.description && (
+                        <p className="text-xs text-[#64748b] line-clamp-2 mb-2">{idea.description}</p>
+                      )}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {idea.search_volume && <Badge variant="blue">SV: {idea.search_volume}</Badge>}
+                        {idea.pain_level && <Badge variant="amber">Pain: {idea.pain_level}</Badge>}
+                        {idea.revenue_potential && <Badge variant="emerald">{idea.revenue_potential}</Badge>}
+                        {idea.execution_difficulty && <Badge variant="rose">Exec: {idea.execution_difficulty}</Badge>}
+                        {idea.category && <Badge variant="default">{idea.category}</Badge>}
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Guided Action Plan — generated from project summary */}
             {(() => {
-              const hasNiche = !!(project.niche && project.niche.trim());
-              const hasAudience = !!(project.target_audience && project.target_audience.trim());
-              const hasDescription = !!(project.description && project.description.trim().length > 20);
-              const hasMarketResearch = activity.some((a) => a.skill_used === "Market Research Agent");
-              const hasCompetitiveAnalysis = activity.some((a) => a.skill_used === "Competitive Intel Scout");
-              const hasLandingPage = contentPieces.some((c) => c.type === "landing_page");
-              const hasContacts = contacts.length > 0;
-              const hasOutboundSequence = activity.some((a) => a.skill_used === "Outbound Sequence Builder");
-              const hasContentStrategy = activity.some((a) => a.skill_used === "Content Engine");
+              // Determine completion for each step dynamically
+              const isStepCompleted = (step: ActionPlanStep): boolean => {
+                if (step.actionType === "define-niche") {
+                  return !!(project.niche?.trim() && project.target_audience?.trim());
+                }
+                if (step.actionType === "define-offer") {
+                  return !!(project.description?.trim() && project.description.trim().length > 20);
+                }
+                if (step.actionType === "add-contacts") {
+                  return contacts.length > 0;
+                }
+                if (step.actionType === "skill" && step.skillName) {
+                  // Only mark complete when the result was SAVED, not just executed
+                  return activity.some((a) => a.action === "result_saved" && a.skill_used === step.skillName);
+                }
+                return false;
+              };
 
-              const steps = [
-                {
-                  id: "define-niche",
-                  label: "Define your niche and target audience",
-                  desc: hasNiche && hasAudience
-                    ? `${project.niche} \u2014 ${project.target_audience}`
-                    : "Set who you're building for so every other step is targeted",
-                  badge: "Setup",
-                  badgeVariant: "default" as const,
-                  completed: hasNiche && hasAudience,
-                  available: true,
-                },
-                {
-                  id: "market-research",
-                  label: "Research your market",
-                  desc: "Analyze market size, trends, audience pain points, and opportunities",
-                  badge: "Search",
-                  badgeVariant: "info" as const,
-                  completed: hasMarketResearch,
-                  available: hasNiche,
-                },
-                {
-                  id: "competitive-analysis",
-                  label: "Analyze your competitors",
-                  desc: "Map the competitive landscape and find positioning gaps",
-                  badge: "Search",
-                  badgeVariant: "info" as const,
-                  completed: hasCompetitiveAnalysis,
-                  available: hasNiche,
-                },
-                {
-                  id: "define-offer",
-                  label: "Define your offer and positioning",
-                  desc: hasDescription
-                    ? project.description.slice(0, 80) + (project.description.length > 80 ? "..." : "")
-                    : "Craft your value proposition based on the research",
-                  badge: "Setup",
-                  badgeVariant: "default" as const,
-                  completed: hasDescription,
-                  available: hasNiche,
-                },
-                {
-                  id: "landing-page",
-                  label: "Generate a landing page",
-                  desc: "Create a high-converting sales page with proven copy frameworks",
-                  badge: "Agent",
-                  badgeVariant: "warning" as const,
-                  completed: hasLandingPage,
-                  available: hasNiche && hasDescription,
-                },
-                {
-                  id: "add-contacts",
-                  label: "Add target contacts",
-                  desc: "Build your outreach list with prospective customers",
-                  badge: "Outbound",
-                  badgeVariant: "default" as const,
-                  completed: hasContacts,
-                  available: hasNiche,
-                },
-                {
-                  id: "outbound-sequence",
-                  label: "Build outbound sequence",
-                  desc: "Create a multi-channel outreach campaign for your contacts",
-                  badge: "Outbound",
-                  badgeVariant: "default" as const,
-                  completed: hasOutboundSequence,
-                  available: hasContacts,
-                },
-                {
-                  id: "content-strategy",
-                  label: "Create content strategy",
-                  desc: "Generate blog posts, social threads, and newsletter content",
-                  badge: "Audience",
-                  badgeVariant: "rose" as const,
-                  completed: hasContentStrategy,
-                  available: hasNiche && hasAudience,
-                },
-              ];
+              // No plan generated yet — show generate button or prompt
+              if (actionPlan.length === 0) {
+                const hasSummary = !!(project.description?.trim() || project.niche?.trim());
+                return (
+                  <div>
+                    <h2 className="text-sm font-semibold text-[#94a3b8] uppercase tracking-wider mb-3">
+                      Action Plan
+                    </h2>
+                    <div className="border border-dashed border-[#334155] rounded-lg p-6 text-center">
+                      {hasSummary ? (
+                        <>
+                          <p className="text-sm text-[#94a3b8] mb-3">
+                            Generate a tailored action plan based on your project summary.
+                          </p>
+                          <Button onClick={handleGeneratePlan} disabled={generatingPlan}>
+                            {generatingPlan ? (
+                              <>
+                                <div className="animate-spin rounded-full h-3 w-3 border border-current border-t-transparent" />
+                                Analyzing project...
+                              </>
+                            ) : (
+                              "Generate Action Plan"
+                            )}
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-[#94a3b8] mb-2">
+                            Add a project description or niche first.
+                          </p>
+                          <p className="text-xs text-[#64748b]">
+                            The action plan is generated from your project details — without them, there&apos;s nothing to base recommendations on.
+                          </p>
+                          <Button size="sm" variant="secondary" className="mt-3" onClick={openEditModal}>
+                            Edit Project Details
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
 
-              const completedSteps = steps.filter((s) => s.completed).length;
-              const nextStep = steps.find((s) => !s.completed && s.available);
+              // Plan exists — render it
+              const completedSteps = actionPlan.filter(isStepCompleted).length;
+              const firstIncomplete = actionPlan.find((s) => !isStepCompleted(s));
 
               return (
                 <div>
@@ -863,37 +931,44 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     <h2 className="text-sm font-semibold text-[#94a3b8] uppercase tracking-wider">
                       Action Plan
                     </h2>
-                    <span className="text-[10px] text-[#64748b]">
-                      {completedSteps}/{steps.length} completed
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] text-[#64748b]">
+                        {completedSteps}/{actionPlan.length} completed
+                      </span>
+                      <button
+                        onClick={handleGeneratePlan}
+                        disabled={generatingPlan}
+                        className="text-[10px] text-amber-500 hover:text-amber-400 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {generatingPlan ? "Regenerating..." : "Regenerate"}
+                      </button>
+                    </div>
                   </div>
 
                   {/* Progress bar */}
                   <div className="w-full h-1 bg-[#1e293b] rounded-full mb-4 overflow-hidden">
                     <div
                       className="h-full bg-amber-500 rounded-full transition-all duration-500"
-                      style={{ width: `${(completedSteps / steps.length) * 100}%` }}
+                      style={{ width: `${(completedSteps / actionPlan.length) * 100}%` }}
                     />
                   </div>
 
                   <div className="space-y-1">
-                    {steps.map((step, idx) => {
-                      const isNext = nextStep?.id === step.id;
+                    {actionPlan.map((step, idx) => {
+                      const completed = isStepCompleted(step);
+                      const isNext = firstIncomplete?.id === step.id;
                       const isRunning = runningAction === step.id;
-                      const isLocked = !step.available && !step.completed;
 
                       return (
                         <button
                           key={step.id}
-                          onClick={() => !isLocked && handleRunAction(step.id)}
-                          disabled={isLocked || !!runningAction}
+                          onClick={() => handleRunAction(step.id)}
+                          disabled={!!runningAction}
                           className={`w-full text-left rounded-lg border p-3 flex items-center gap-3 transition-all ${
-                            step.completed
+                            completed
                               ? "border-emerald-500/20 bg-emerald-500/5 opacity-70"
                               : isNext
                               ? "border-amber-500/40 bg-amber-500/5 cursor-pointer hover:bg-amber-500/10"
-                              : isLocked
-                              ? "border-[#1e293b] bg-[#141822] opacity-40 cursor-not-allowed"
                               : "border-[#1e293b] bg-[#141822] cursor-pointer hover:border-[#334155] hover:bg-[#1a1f2e]"
                           } ${isRunning ? "border-amber-500/30 animate-pulse" : ""}`}
                         >
@@ -901,17 +976,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                           <div className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold">
                             {isRunning ? (
                               <div className="w-4 h-4 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
-                            ) : step.completed ? (
+                            ) : completed ? (
                               <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center">
                                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                                   <path d="M2.5 6l2.5 2.5 4.5-5" stroke="#10b981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              </div>
-                            ) : isLocked ? (
-                              <div className="w-6 h-6 rounded-full bg-[#1e293b] flex items-center justify-center">
-                                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                                  <rect x="2.5" y="4.5" width="5" height="4" rx="0.5" stroke="#64748b" strokeWidth="1" />
-                                  <path d="M3.5 4.5V3a1.5 1.5 0 013 0v1.5" stroke="#64748b" strokeWidth="1" />
                                 </svg>
                               </div>
                             ) : (
@@ -926,12 +994,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                           {/* Content */}
                           <div className="flex-1 min-w-0">
                             <span className={`text-sm ${
-                              step.completed ? "text-emerald-400 line-through" : isNext ? "text-[#e2e8f0] font-medium" : "text-[#e2e8f0]"
+                              completed ? "text-emerald-400 line-through" : isNext ? "text-[#e2e8f0] font-medium" : "text-[#e2e8f0]"
                             }`}>
                               {step.label}
                             </span>
                             <p className="text-[10px] text-[#64748b] mt-0.5 truncate">
-                              {isLocked ? "Complete earlier steps first" : step.desc}
+                              {step.desc}
                             </p>
                           </div>
 
@@ -1205,6 +1273,79 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                     <pre className="text-sm text-[#e2e8f0] whitespace-pre-wrap font-mono">
                       {execResult}
                     </pre>
+                    <div className="flex gap-2 mt-3 pt-3 border-t border-[#1e293b]">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={async () => {
+                          const res = await fetch("/api/insights", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              title: `${execSkill?.name}: ${project.name}`,
+                              description: execResult,
+                              source: execSkill?.name,
+                              category: "analysis",
+                              project_id: id,
+                            }),
+                          });
+                          if (res.ok) {
+                            await fetch("/api/activity", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                project_id: id,
+                                action: "result_saved",
+                                details: `Saved insight from ${execSkill?.name}`,
+                                skill_used: execSkill?.name,
+                              }),
+                            });
+                            refreshStepData();
+                            fetchActivity();
+                            setExecSkill(null);
+                          } else {
+                            setError("Failed to save as insight");
+                          }
+                        }}
+                      >
+                        Save as Insight
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={async () => {
+                          const res = await fetch("/api/content", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              type: "post",
+                              title: `${execSkill?.name}: ${project.name}`,
+                              content: execResult,
+                              project_id: id,
+                            }),
+                          });
+                          if (res.ok) {
+                            await fetch("/api/activity", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                project_id: id,
+                                action: "result_saved",
+                                details: `Saved content from ${execSkill?.name}`,
+                                skill_used: execSkill?.name,
+                              }),
+                            });
+                            refreshStepData();
+                            fetchActivity();
+                            setExecSkill(null);
+                          } else {
+                            setError("Failed to save as content");
+                          }
+                        }}
+                      >
+                        Save as Content
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1327,16 +1468,39 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         <div className="animate-spin rounded-full h-3 w-3 border border-current border-t-transparent" />
                         Saving...
                       </>
-                    ) : actionResult.actionId === "landing-page" ? (
+                    ) : actionResult.saveAs === "landing_page" ? (
                       "Save as Landing Page"
-                    ) : actionResult.actionId === "market-research" ? (
-                      "Save Insight & Create Task"
-                    ) : actionResult.actionId === "outbound-sequence" ? (
-                      "Save Outbound Sequence"
-                    ) : actionResult.actionId === "content-strategy" ? (
-                      "Save Content Strategy"
+                    ) : actionResult.saveAs === "email" ? (
+                      "Save Email Sequence"
+                    ) : actionResult.saveAs === "post" ? (
+                      "Save Content"
+                    ) : actionResult.saveAs === "lead_magnet" ? (
+                      "Save Lead Magnet"
+                    ) : actionResult.saveAs === "script" ? (
+                      "Save Script"
                     ) : (
                       "Save as Insight"
+                    )}
+                  </Button>
+                )}
+                {resultSaved && savedActionContentId && (
+                  <Button
+                    onClick={handlePublishActionContent}
+                    disabled={publishingAction}
+                    variant="secondary"
+                  >
+                    {publishingAction ? (
+                      <>
+                        <div className="animate-spin rounded-full h-3 w-3 border border-current border-t-transparent" />
+                        Publishing...
+                      </>
+                    ) : (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                          <path d="M2 12L12 2M12 2H5M12 2v7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        Publish to Platform
+                      </>
                     )}
                   </Button>
                 )}

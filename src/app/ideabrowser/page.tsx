@@ -103,6 +103,9 @@ export default function IdeaBrowserPage() {
   const [generating, setGenerating] = useState<string | null>(null);
   const [generateResult, setGenerateResult] = useState("");
 
+  // Bookmarklet
+  const [showBookmarklet, setShowBookmarklet] = useState(false);
+
   const fetchData = () => {
     Promise.all([
       fetch("/api/ideabrowser/ideas").then((r) => (r.ok ? r.json() : [])).catch(() => []),
@@ -438,7 +441,45 @@ export default function IdeaBrowserPage() {
         <span>
           {ideas.length} idea{ideas.length !== 1 ? "s" : ""} total
         </span>
+        <span className="text-[#1e293b]">|</span>
+        <button
+          onClick={() => setShowBookmarklet(!showBookmarklet)}
+          className="text-amber-500 hover:text-amber-400 transition-colors cursor-pointer"
+        >
+          {showBookmarklet ? "Hide" : "Show"} Browser Capture
+        </button>
       </div>
+
+      {/* Bookmarklet Instructions */}
+      {showBookmarklet && (
+        <Card hover={false} className="!bg-amber-500/5 !border-amber-500/20">
+          <h3 className="text-sm font-semibold text-amber-400 mb-2">Browser Capture — Pull ideas from IdeaBrowser.com</h3>
+          <p className="text-xs text-[#94a3b8] mb-3">
+            IdeaBrowser.com blocks automated scraping. Use this bookmarklet to capture ideas directly from your browser:
+          </p>
+          <ol className="text-xs text-[#94a3b8] space-y-2 mb-4 list-decimal list-inside">
+            <li>Drag the button below to your browser&apos;s bookmarks bar</li>
+            <li>Visit <a href="https://www.ideabrowser.com/database" target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:text-amber-300 underline">ideabrowser.com/database</a>, <a href="https://www.ideabrowser.com/top-ideas" target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:text-amber-300 underline">/top-ideas</a>, or <a href="https://www.ideabrowser.com/idea-of-the-day" target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:text-amber-300 underline">/idea-of-the-day</a></li>
+            <li>Click the bookmarklet — it will extract all ideas and send them here</li>
+          </ol>
+          <div className="flex items-center gap-3">
+            {/* The bookmarklet — must be an <a> with href="javascript:..." for drag-to-bookmarks-bar */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a
+              href={`javascript:void(function(){var s=document.createElement('script');s.src='${typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"}/api/ideabrowser/bookmarklet.js';document.body.appendChild(s)}())`}
+              onClick={(e) => e.preventDefault()}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 text-[#0a0c14] text-xs font-bold cursor-grab active:cursor-grabbing hover:bg-amber-400 transition-colors select-none"
+              title="Drag this to your bookmarks bar"
+            >
+              <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                <path d="M7 1l2 4h4l-3 3 1 4-4-2-4 2 1-4-3-3h4z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+              </svg>
+              Capture IdeaBrowser
+            </a>
+            <span className="text-[10px] text-[#64748b]">Drag to bookmarks bar</span>
+          </div>
+        </Card>
+      )}
 
       {/* Error / Success banners */}
       {error && (

@@ -1,6 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from './schema';
 
+// Re-export getDb for routes that need direct DB access
+export { getDb };
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface Project {
@@ -79,7 +82,7 @@ export interface Skill {
 
 export interface Connection {
   id: string;
-  provider: 'openai' | 'anthropic' | 'ollama' | 'perplexity' | 'exa' | 'firecrawl';
+  provider: 'openai' | 'anthropic' | 'ollama' | 'perplexity' | 'exa' | 'firecrawl' | 'claude-cli';
   api_key_encrypted: string | null;
   base_url: string | null;
   model: string | null;
@@ -98,7 +101,42 @@ export interface ContentPiece {
   scheduled_at: string | null;
   published_url: string | null;
   published_at: string | null;
+  media_url: string | null;
+  tracked_url: string | null;
+  metadata: string | null;
   created_at: string;
+}
+
+export interface ContentAnalytics {
+  id: string;
+  content_id: string;
+  platform: string;
+  impressions: number;
+  clicks: number;
+  likes: number;
+  shares: number;
+  comments: number;
+  reach: number;
+  platform_post_id: string | null;
+  fetched_at: string;
+}
+
+export interface AdCampaign {
+  id: string;
+  project_id: string | null;
+  platform: 'facebook' | 'google' | 'tiktok';
+  name: string;
+  objective: string;
+  budget_daily: number | null;
+  budget_total: number | null;
+  targeting: string | null;
+  ad_copy: string | null;
+  ad_creative: string | null;
+  status: 'draft' | 'ready' | 'submitted' | 'active' | 'paused' | 'completed';
+  platform_campaign_id: string | null;
+  platform_response: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface PlatformConnection {
@@ -157,6 +195,14 @@ export interface Newsletter {
   recipients: string | null;
   sent_at: string | null;
   sent_count: number;
+  subject_b: string | null;
+  subject_c: string | null;
+  subject_d: string | null;
+  ab_test_sample_pct: number;
+  ab_winner: string | null;
+  open_rate: number;
+  click_rate: number;
+  unsubscribe_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -398,37 +444,9 @@ export function deleteTask(id: string): boolean {
   return result.changes > 0;
 }
 
-// ─── Activity Log ─────────────────────────────────────────────────────────────
-
-export function getActivity(limit: number = 50): ActivityEntry[] {
-  return getDb().prepare('SELECT * FROM activity_log ORDER BY created_at DESC LIMIT ?').all(limit) as ActivityEntry[];
-}
-
-export function getProjectActivity(projectId: string, limit: number = 50): ActivityEntry[] {
-  return getDb().prepare('SELECT * FROM activity_log WHERE project_id = ? ORDER BY created_at DESC LIMIT ?').all(projectId, limit) as ActivityEntry[];
-}
-
-export function logActivity(data: {
-  project_id?: string;
-  action: string;
-  details?: string;
-  rail?: string;
-  skill_used?: string;
-}): ActivityEntry {
-  const id = uuidv4();
-  getDb().prepare(`
-    INSERT INTO activity_log (id, project_id, action, details, rail, skill_used)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    data.project_id ?? null,
-    data.action,
-    data.details ?? null,
-    data.rail ?? null,
-    data.skill_used ?? null,
-  );
-  return getDb().prepare('SELECT * FROM activity_log WHERE id = ?').get(id) as ActivityEntry;
-}
+// ─── Activity Log — moved to ./core.ts, re-exported for backward compat ─────
+import { getActivity, getProjectActivity, logActivity } from "./core";
+export { getActivity, getProjectActivity, logActivity };
 
 // ─── Skills ───────────────────────────────────────────────────────────────────
 
@@ -447,7 +465,22 @@ export function getActiveSkills(): Skill[] {
 // ─── Connections ──────────────────────────────────────────────────────────────
 
 export function getConnections(): Connection[] {
-  return getDb().prepare('SELECT * FROM connections ORDER BY created_at DESC').all() as Connection[];
+  return getDb().prepare('SELECT * FROM connections ORDER BY priority ASC, created_at DESC').all() as Connection[];
+}
+
+// Get the best active connection: primary (lowest priority number) first, with fallback
+export function getActiveConnection(connectionId?: string): Connection | undefined {
+  if (connectionId) {
+    return getDb().prepare('SELECT * FROM connections WHERE id = ?').get(connectionId) as Connection | undefined;
+  }
+  // Try primary first (lowest priority), then any active
+  return getDb().prepare('SELECT * FROM connections WHERE is_active = 1 ORDER BY priority ASC LIMIT 1').get() as Connection | undefined;
+}
+
+// Try primary, if it fails return fallback
+export function getConnectionWithFallback(): { primary: Connection | undefined; fallback: Connection | undefined } {
+  const all = getDb().prepare('SELECT * FROM connections WHERE is_active = 1 ORDER BY priority ASC').all() as Connection[];
+  return { primary: all[0], fallback: all[1] };
 }
 
 export function createConnection(data: {
@@ -521,11 +554,13 @@ export function createContent(data: {
   platform?: string;
   status?: ContentPiece['status'];
   scheduled_at?: string;
+  media_url?: string;
+  metadata?: string;
 }): ContentPiece {
   const id = uuidv4();
   getDb().prepare(`
-    INSERT INTO content_pieces (id, project_id, type, title, content, platform, status, scheduled_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO content_pieces (id, project_id, type, title, content, platform, status, scheduled_at, media_url, metadata)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     data.project_id || null,
@@ -535,8 +570,95 @@ export function createContent(data: {
     data.platform ?? null,
     data.status ?? 'draft',
     data.scheduled_at ?? null,
+    data.media_url ?? null,
+    data.metadata ?? null,
   );
   return getDb().prepare('SELECT * FROM content_pieces WHERE id = ?').get(id) as ContentPiece;
+}
+
+// ─── Ad Campaigns ─────────────────────────────────────────────────────────────
+
+export function getAdCampaigns(): AdCampaign[] {
+  return getDb().prepare('SELECT * FROM ad_campaigns ORDER BY created_at DESC').all() as AdCampaign[];
+}
+
+export function getAdCampaign(id: string): AdCampaign | undefined {
+  return getDb().prepare('SELECT * FROM ad_campaigns WHERE id = ?').get(id) as AdCampaign | undefined;
+}
+
+export function createAdCampaign(data: {
+  project_id?: string;
+  platform: AdCampaign['platform'];
+  name: string;
+  objective?: string;
+  budget_daily?: number;
+  budget_total?: number;
+  targeting?: string;
+  ad_copy?: string;
+  ad_creative?: string;
+}): AdCampaign {
+  const id = uuidv4();
+  getDb().prepare(`
+    INSERT INTO ad_campaigns (id, project_id, platform, name, objective, budget_daily, budget_total, targeting, ad_copy, ad_creative)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, data.project_id || null, data.platform, data.name, data.objective || 'traffic',
+    data.budget_daily || null, data.budget_total || null, data.targeting || null,
+    data.ad_copy || null, data.ad_creative || null);
+  return getDb().prepare('SELECT * FROM ad_campaigns WHERE id = ?').get(id) as AdCampaign;
+}
+
+export function updateAdCampaign(id: string, data: Partial<AdCampaign>): AdCampaign | undefined {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  for (const [key, val] of Object.entries(data)) {
+    if (key === 'id' || key === 'created_at') continue;
+    fields.push(`${key} = ?`);
+    values.push(val);
+  }
+  if (fields.length === 0) return getAdCampaign(id);
+  fields.push('updated_at = datetime(\'now\')');
+  values.push(id);
+  getDb().prepare(`UPDATE ad_campaigns SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  return getAdCampaign(id);
+}
+
+// ─── Content Analytics ────────────────────────────────────────────────────────
+
+export function getContentAnalytics(contentId: string): ContentAnalytics[] {
+  return getDb().prepare('SELECT * FROM content_analytics WHERE content_id = ? ORDER BY fetched_at DESC').all(contentId) as ContentAnalytics[];
+}
+
+export function getAllContentAnalytics(): ContentAnalytics[] {
+  return getDb().prepare('SELECT * FROM content_analytics ORDER BY fetched_at DESC').all() as ContentAnalytics[];
+}
+
+export function upsertContentAnalytics(data: {
+  content_id: string;
+  platform: string;
+  impressions?: number;
+  clicks?: number;
+  likes?: number;
+  shares?: number;
+  comments?: number;
+  reach?: number;
+  platform_post_id?: string;
+}): void {
+  const existing = getDb().prepare(
+    'SELECT id FROM content_analytics WHERE content_id = ? AND platform = ?'
+  ).get(data.content_id, data.platform) as { id: string } | undefined;
+
+  if (existing) {
+    getDb().prepare(`
+      UPDATE content_analytics SET impressions = ?, clicks = ?, likes = ?, shares = ?, comments = ?, reach = ?, fetched_at = datetime('now')
+      WHERE id = ?
+    `).run(data.impressions || 0, data.clicks || 0, data.likes || 0, data.shares || 0, data.comments || 0, data.reach || 0, existing.id);
+  } else {
+    const id = uuidv4();
+    getDb().prepare(`
+      INSERT INTO content_analytics (id, content_id, platform, impressions, clicks, likes, shares, comments, reach, platform_post_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, data.content_id, data.platform, data.impressions || 0, data.clicks || 0, data.likes || 0, data.shares || 0, data.comments || 0, data.reach || 0, data.platform_post_id || null);
+  }
 }
 
 export function updateContent(id: string, data: Partial<{
@@ -547,6 +669,8 @@ export function updateContent(id: string, data: Partial<{
   status: ContentPiece['status'];
   scheduled_at: string;
   project_id: string;
+  metadata: string;
+  media_url: string;
 }>): ContentPiece | undefined {
   const existing = getDb().prepare('SELECT * FROM content_pieces WHERE id = ?').get(id) as ContentPiece | undefined;
   if (!existing) return undefined;
@@ -561,6 +685,7 @@ export function updateContent(id: string, data: Partial<{
   if (data.status !== undefined) { fields.push('status = ?'); values.push(data.status); }
   if (data.scheduled_at !== undefined) { fields.push('scheduled_at = ?'); values.push(data.scheduled_at); }
   if (data.project_id !== undefined) { fields.push('project_id = ?'); values.push(data.project_id); }
+  if (data.media_url !== undefined) { fields.push('media_url = ?'); values.push(data.media_url); }
 
   if (fields.length === 0) return existing;
 
@@ -588,11 +713,12 @@ export function createContact(data: {
   status?: OutboundContact['status'];
   sequence_step?: number;
   notes?: string;
+  tags?: string;
 }): OutboundContact {
   const id = uuidv4();
   getDb().prepare(`
-    INSERT INTO outbound_contacts (id, project_id, name, email, company, role, status, sequence_step, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO outbound_contacts (id, project_id, name, email, company, role, status, sequence_step, notes, tags)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     data.project_id || null,
@@ -603,6 +729,7 @@ export function createContact(data: {
     data.status ?? 'lead',
     data.sequence_step ?? 0,
     data.notes ?? null,
+    data.tags ?? null,
   );
   return getDb().prepare('SELECT * FROM outbound_contacts WHERE id = ?').get(id) as OutboundContact;
 }
@@ -824,11 +951,14 @@ export function createNewsletter(data: {
   status?: Newsletter['status'];
   newsletter_type?: Newsletter['newsletter_type'];
   recipients?: string;
+  subject_b?: string;
+  subject_c?: string;
+  ab_test_sample_pct?: number;
 }): Newsletter {
   const id = uuidv4();
   getDb().prepare(`
-    INSERT INTO newsletters (id, project_id, title, subject, content, status, newsletter_type, recipients)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO newsletters (id, project_id, title, subject, content, status, newsletter_type, recipients, subject_b, subject_c, ab_test_sample_pct)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     data.project_id ?? null,
@@ -838,6 +968,9 @@ export function createNewsletter(data: {
     data.status ?? 'draft',
     data.newsletter_type ?? 'weekly',
     data.recipients ?? null,
+    data.subject_b ?? null,
+    data.subject_c ?? null,
+    data.ab_test_sample_pct ?? 20,
   );
   return getDb().prepare('SELECT * FROM newsletters WHERE id = ?').get(id) as Newsletter;
 }
@@ -852,6 +985,13 @@ export function updateNewsletter(id: string, data: Partial<{
   sent_at: string;
   sent_count: number;
   project_id: string | null;
+  subject_b: string | null;
+  subject_c: string | null;
+  ab_test_sample_pct: number;
+  ab_winner: string | null;
+  open_rate: number;
+  click_rate: number;
+  unsubscribe_count: number;
 }>): Newsletter | undefined {
   const existing = getNewsletter(id);
   if (!existing) return undefined;
@@ -868,6 +1008,13 @@ export function updateNewsletter(id: string, data: Partial<{
   if (data.sent_at !== undefined) { fields.push('sent_at = ?'); values.push(data.sent_at); }
   if (data.sent_count !== undefined) { fields.push('sent_count = ?'); values.push(data.sent_count); }
   if (data.project_id !== undefined) { fields.push('project_id = ?'); values.push(data.project_id); }
+  if (data.subject_b !== undefined) { fields.push('subject_b = ?'); values.push(data.subject_b); }
+  if (data.subject_c !== undefined) { fields.push('subject_c = ?'); values.push(data.subject_c); }
+  if (data.ab_test_sample_pct !== undefined) { fields.push('ab_test_sample_pct = ?'); values.push(data.ab_test_sample_pct); }
+  if (data.ab_winner !== undefined) { fields.push('ab_winner = ?'); values.push(data.ab_winner); }
+  if (data.open_rate !== undefined) { fields.push('open_rate = ?'); values.push(data.open_rate); }
+  if (data.click_rate !== undefined) { fields.push('click_rate = ?'); values.push(data.click_rate); }
+  if (data.unsubscribe_count !== undefined) { fields.push('unsubscribe_count = ?'); values.push(data.unsubscribe_count); }
 
   if (fields.length === 0) return existing;
 
@@ -903,355 +1050,15 @@ export function getNewsletterContext(projectId: string): {
   };
 }
 
-// ─── IdeaBrowser ──────────────────────────────────────────────────────────────
+// ─── IdeaBrowser — moved to ./ideabrowser.ts ───────────────────────────────
+export * from "./ideabrowser";
 
-export interface IdeaBrowserIdea {
-  id: string;
-  title: string;
-  description: string | null;
-  source_url: string | null;
-  category: string | null;
-  tags: string | null;
-  search_volume: string | null;
-  growth_rate: string | null;
-  pain_level: string | null;
-  feasibility: string | null;
-  founder_fit: string | null;
-  revenue_potential: string | null;
-  execution_difficulty: string | null;
-  go_to_market: string | null;
-  pricing: string | null;
-  target_market: string | null;
-  competition: string | null;
-  raw_data: string | null;
-  product_urgency: string | null;
-  market_gap: string | null;
-  execution_plan: string | null;
-  idea_date: string | null;
-  search_volume_score: number;
-  growth_rate_score: number;
-  pain_level_score: number;
-  feasibility_score: number;
-  revenue_potential_score: number;
-  overall_score: number;
-  google_trends_data: string | null;
-  sync_status: 'scraped' | 'manual' | 'modified';
-  project_id: string | null;
-  imported_at: string;
-  updated_at: string;
-}
 
-export interface IdeaBrowserTrend {
-  id: string;
-  title: string;
-  category: string | null;
-  growth_pct: number;
-  sparkline_data: string | null;
-  search_volume: number;
-  timeframe: string;
-  source: string;
-  created_at: string;
-}
+// ─── Agent Tasks — moved to ./agents.ts ────────────────────────────────────
+export * from "./agents";
 
-export interface IdeaBrowserMarketInsight {
-  id: string;
-  title: string;
-  description: string | null;
-  category: string | null;
-  metric_label: string | null;
-  metric_value: string | null;
-  trend_direction: 'up' | 'down' | 'flat' | null;
-  source: string | null;
-  sparkline_data: string | null;
-  created_at: string;
-}
+// ─── Domain Re-exports ───────────────────────────────────────────────────────
+// Kept here so existing `import { ... } from "@/lib/db"` keeps working.
+// The actual implementation lives in domain modules.
 
-export function getIdeaBrowserIdeas(): IdeaBrowserIdea[] {
-  return getDb().prepare('SELECT * FROM ideabrowser_ideas ORDER BY imported_at DESC').all() as IdeaBrowserIdea[];
-}
-
-export function getIdeaBrowserIdea(id: string): IdeaBrowserIdea | undefined {
-  return getDb().prepare('SELECT * FROM ideabrowser_ideas WHERE id = ?').get(id) as IdeaBrowserIdea | undefined;
-}
-
-export function getProjectIdeaBrowserIdeas(projectId: string): IdeaBrowserIdea[] {
-  return getDb().prepare('SELECT * FROM ideabrowser_ideas WHERE project_id = ? ORDER BY imported_at DESC').all(projectId) as IdeaBrowserIdea[];
-}
-
-export function createIdeaBrowserIdea(data: {
-  title: string;
-  description?: string;
-  source_url?: string;
-  category?: string;
-  tags?: string;
-  search_volume?: string;
-  growth_rate?: string;
-  pain_level?: string;
-  feasibility?: string;
-  founder_fit?: string;
-  revenue_potential?: string;
-  execution_difficulty?: string;
-  go_to_market?: string;
-  pricing?: string;
-  target_market?: string;
-  competition?: string;
-  raw_data?: string;
-  sync_status?: string;
-  project_id?: string;
-}): IdeaBrowserIdea {
-  const id = uuidv4();
-  getDb().prepare(`
-    INSERT INTO ideabrowser_ideas (id, title, description, source_url, category, tags, search_volume, growth_rate, pain_level, feasibility, founder_fit, revenue_potential, execution_difficulty, go_to_market, pricing, target_market, competition, raw_data, sync_status, project_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    data.title,
-    data.description || null,
-    data.source_url || null,
-    data.category || null,
-    data.tags || null,
-    data.search_volume || null,
-    data.growth_rate || null,
-    data.pain_level || null,
-    data.feasibility || null,
-    data.founder_fit || null,
-    data.revenue_potential || null,
-    data.execution_difficulty || null,
-    data.go_to_market || null,
-    data.pricing || null,
-    data.target_market || null,
-    data.competition || null,
-    data.raw_data || null,
-    data.sync_status || 'manual',
-    data.project_id || null,
-  );
-  return getIdeaBrowserIdea(id)!;
-}
-
-export function updateIdeaBrowserIdea(id: string, data: Partial<IdeaBrowserIdea>): IdeaBrowserIdea | undefined {
-  const existing = getIdeaBrowserIdea(id);
-  if (!existing) return undefined;
-
-  const fields: string[] = [];
-  const values: unknown[] = [];
-
-  if (data.title !== undefined) { fields.push('title = ?'); values.push(data.title); }
-  if (data.description !== undefined) { fields.push('description = ?'); values.push(data.description); }
-  if (data.source_url !== undefined) { fields.push('source_url = ?'); values.push(data.source_url); }
-  if (data.category !== undefined) { fields.push('category = ?'); values.push(data.category); }
-  if (data.tags !== undefined) { fields.push('tags = ?'); values.push(data.tags); }
-  if (data.search_volume !== undefined) { fields.push('search_volume = ?'); values.push(data.search_volume); }
-  if (data.growth_rate !== undefined) { fields.push('growth_rate = ?'); values.push(data.growth_rate); }
-  if (data.pain_level !== undefined) { fields.push('pain_level = ?'); values.push(data.pain_level); }
-  if (data.feasibility !== undefined) { fields.push('feasibility = ?'); values.push(data.feasibility); }
-  if (data.founder_fit !== undefined) { fields.push('founder_fit = ?'); values.push(data.founder_fit); }
-  if (data.revenue_potential !== undefined) { fields.push('revenue_potential = ?'); values.push(data.revenue_potential); }
-  if (data.execution_difficulty !== undefined) { fields.push('execution_difficulty = ?'); values.push(data.execution_difficulty); }
-  if (data.go_to_market !== undefined) { fields.push('go_to_market = ?'); values.push(data.go_to_market); }
-  if (data.pricing !== undefined) { fields.push('pricing = ?'); values.push(data.pricing); }
-  if (data.target_market !== undefined) { fields.push('target_market = ?'); values.push(data.target_market); }
-  if (data.competition !== undefined) { fields.push('competition = ?'); values.push(data.competition); }
-  if (data.raw_data !== undefined) { fields.push('raw_data = ?'); values.push(data.raw_data); }
-  if (data.sync_status !== undefined) { fields.push('sync_status = ?'); values.push(data.sync_status); }
-  if (data.project_id !== undefined) { fields.push('project_id = ?'); values.push(data.project_id); }
-
-  if (fields.length === 0) return existing;
-
-  fields.push("updated_at = datetime('now')");
-  values.push(id);
-  getDb().prepare(`UPDATE ideabrowser_ideas SET ${fields.join(', ')} WHERE id = ?`).run(...values);
-  return getIdeaBrowserIdea(id);
-}
-
-export function deleteIdeaBrowserIdea(id: string): boolean {
-  const result = getDb().prepare('DELETE FROM ideabrowser_ideas WHERE id = ?').run(id);
-  return result.changes > 0;
-}
-
-export function bulkImportIdeaBrowserIdeas(ideas: Array<{
-  title: string;
-  description?: string;
-  source_url?: string;
-  category?: string;
-  tags?: string;
-  search_volume?: string;
-  growth_rate?: string;
-  pain_level?: string;
-  feasibility?: string;
-  founder_fit?: string;
-  revenue_potential?: string;
-  execution_difficulty?: string;
-  go_to_market?: string;
-  pricing?: string;
-  target_market?: string;
-  competition?: string;
-  raw_data?: string;
-  sync_status?: string;
-}>): { imported: IdeaBrowserIdea[]; skipped: number } {
-  const db = getDb();
-  const insert = db.prepare(`
-    INSERT INTO ideabrowser_ideas (id, title, description, source_url, category, tags, search_volume, growth_rate, pain_level, feasibility, founder_fit, revenue_potential, execution_difficulty, go_to_market, pricing, target_market, competition, raw_data, sync_status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const checkExisting = db.prepare('SELECT id FROM ideabrowser_ideas WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) LIMIT 1');
-
-  const imported: IdeaBrowserIdea[] = [];
-  let skipped = 0;
-
-  const tx = db.transaction(() => {
-    for (const idea of ideas) {
-      if (!idea.title) { skipped++; continue; }
-      // Deduplicate by normalized title
-      const existing = checkExisting.get(idea.title);
-      if (existing) { skipped++; continue; }
-      const id = uuidv4();
-      insert.run(
-        id, idea.title, idea.description || null, idea.source_url || null,
-        idea.category || null, idea.tags || null, idea.search_volume || null,
-        idea.growth_rate || null, idea.pain_level || null, idea.feasibility || null,
-        idea.founder_fit || null, idea.revenue_potential || null, idea.execution_difficulty || null,
-        idea.go_to_market || null, idea.pricing || null, idea.target_market || null,
-        idea.competition || null, idea.raw_data || null, idea.sync_status || 'scraped',
-      );
-      imported.push(getIdeaBrowserIdea(id)!);
-    }
-  });
-
-  tx();
-  return { imported, skipped };
-}
-
-export function linkIdeaToProject(ideaId: string, projectId: string): boolean {
-  const result = getDb().prepare("UPDATE ideabrowser_ideas SET project_id = ?, updated_at = datetime('now') WHERE id = ?").run(projectId, ideaId);
-  return result.changes > 0;
-}
-
-export function getIdeaBrowserConfig(): Record<string, string> {
-  const rows = getDb().prepare('SELECT key, value FROM ideabrowser_config').all() as { key: string; value: string }[];
-  const config: Record<string, string> = {};
-  for (const row of rows) config[row.key] = row.value;
-  return config;
-}
-
-export function setIdeaBrowserConfig(key: string, value: string): void {
-  getDb().prepare('INSERT OR REPLACE INTO ideabrowser_config (key, value) VALUES (?, ?)').run(key, value);
-}
-
-export function getIdeaBrowserIdeaCount(): number {
-  const row = getDb().prepare('SELECT COUNT(*) as cnt FROM ideabrowser_ideas').get() as { cnt: number };
-  return row.cnt;
-}
-
-export function getIdeaOfTheDay(): IdeaBrowserIdea | undefined {
-  // Get the most recently imported idea, or one matching today's date
-  return getDb().prepare(
-    `SELECT * FROM ideabrowser_ideas ORDER BY idea_date DESC, imported_at DESC LIMIT 1`
-  ).get() as IdeaBrowserIdea | undefined;
-}
-
-export function getIdeaBrowserIdeasPaginated(opts: {
-  page?: number;
-  perPage?: number;
-  search?: string;
-  category?: string;
-  sortBy?: string;
-}): { ideas: IdeaBrowserIdea[]; total: number } {
-  const page = opts.page || 1;
-  const perPage = opts.perPage || 48;
-  const offset = (page - 1) * perPage;
-
-  let where = '1=1';
-  const params: unknown[] = [];
-
-  if (opts.search) {
-    where += ' AND (LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(tags) LIKE ?)';
-    const s = `%${opts.search.toLowerCase()}%`;
-    params.push(s, s, s);
-  }
-  if (opts.category) {
-    where += ' AND LOWER(category) = ?';
-    params.push(opts.category.toLowerCase());
-  }
-
-  let orderBy = 'imported_at DESC';
-  if (opts.sortBy === 'score') orderBy = 'overall_score DESC';
-  else if (opts.sortBy === 'pain') orderBy = 'pain_level_score DESC';
-  else if (opts.sortBy === 'revenue') orderBy = 'revenue_potential_score DESC';
-  else if (opts.sortBy === 'newest') orderBy = 'idea_date DESC, imported_at DESC';
-  else if (opts.sortBy === 'category') orderBy = 'category ASC, title ASC';
-
-  const total = (getDb().prepare(`SELECT COUNT(*) as cnt FROM ideabrowser_ideas WHERE ${where}`).get(...params) as { cnt: number }).cnt;
-  const ideas = getDb().prepare(`SELECT * FROM ideabrowser_ideas WHERE ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...params, perPage, offset) as IdeaBrowserIdea[];
-
-  return { ideas, total };
-}
-
-export function getIdeaBrowserCategories(): { category: string; count: number }[] {
-  return getDb().prepare(
-    `SELECT category, COUNT(*) as count FROM ideabrowser_ideas WHERE category IS NOT NULL AND category != '' GROUP BY category ORDER BY count DESC`
-  ).all() as { category: string; count: number }[];
-}
-
-// Trends
-export function getIdeaBrowserTrends(): IdeaBrowserTrend[] {
-  return getDb().prepare('SELECT * FROM ideabrowser_trends ORDER BY growth_pct DESC').all() as IdeaBrowserTrend[];
-}
-
-export function upsertIdeaBrowserTrend(data: Omit<IdeaBrowserTrend, 'created_at'>): void {
-  getDb().prepare(`
-    INSERT OR REPLACE INTO ideabrowser_trends (id, title, category, growth_pct, sparkline_data, search_volume, timeframe, source)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(data.id, data.title, data.category || null, data.growth_pct, data.sparkline_data || null, data.search_volume, data.timeframe, data.source);
-}
-
-// Market Insights
-export function getIdeaBrowserMarketInsights(): IdeaBrowserMarketInsight[] {
-  return getDb().prepare('SELECT * FROM ideabrowser_market_insights ORDER BY created_at DESC').all() as IdeaBrowserMarketInsight[];
-}
-
-export function upsertIdeaBrowserMarketInsight(data: Omit<IdeaBrowserMarketInsight, 'created_at'>): void {
-  getDb().prepare(`
-    INSERT OR REPLACE INTO ideabrowser_market_insights (id, title, description, category, metric_label, metric_value, trend_direction, source, sparkline_data)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(data.id, data.title, data.description || null, data.category || null, data.metric_label || null, data.metric_value || null, data.trend_direction || null, data.source || null, data.sparkline_data || null);
-}
-
-// Scoring engine - compute scores from text fields
-export function scoreIdeaBrowserIdea(id: string): IdeaBrowserIdea | undefined {
-  const idea = getIdeaBrowserIdea(id);
-  if (!idea) return undefined;
-
-  const textToScore = (text: string | null, highKeywords: string[], lowKeywords: string[]): number => {
-    if (!text) return 50;
-    const t = text.toLowerCase();
-    for (const k of highKeywords) if (t.includes(k)) return 85;
-    for (const k of lowKeywords) if (t.includes(k)) return 30;
-    return 60;
-  };
-
-  const sv = textToScore(idea.search_volume, ['high', 'strong', '10k', '50k', '100k'], ['low', 'minimal', 'niche']);
-  const gr = textToScore(idea.growth_rate, ['high', 'rapid', 'surging', 'explosive', '50%', '100%'], ['low', 'declining', 'flat', 'stagnant']);
-  const pl = textToScore(idea.pain_level, ['high', 'severe', 'critical', 'acute', 'extreme'], ['low', 'mild', 'minimal']);
-  const fe = textToScore(idea.feasibility, ['high', 'easy', 'straightforward', 'proven'], ['low', 'complex', 'difficult', 'hard']);
-  const rp = textToScore(idea.revenue_potential, ['high', 'massive', 'large', 'significant', '$1m', '$10m'], ['low', 'small', 'limited', 'niche']);
-
-  const overall = Math.round((sv + gr + pl + fe + rp) / 5);
-
-  getDb().prepare(`
-    UPDATE ideabrowser_ideas
-    SET search_volume_score = ?, growth_rate_score = ?, pain_level_score = ?, feasibility_score = ?, revenue_potential_score = ?, overall_score = ?, updated_at = datetime('now')
-    WHERE id = ?
-  `).run(sv, gr, pl, fe, rp, overall, id);
-
-  return getIdeaBrowserIdea(id);
-}
-
-export function scoreAllIdeaBrowserIdeas(): number {
-  const ideas = getIdeaBrowserIdeas();
-  let scored = 0;
-  for (const idea of ideas) {
-    scoreIdeaBrowserIdea(idea.id);
-    scored++;
-  }
-  return scored;
-}
+export * from "./watchdog";

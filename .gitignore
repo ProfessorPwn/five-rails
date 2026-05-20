@@ -27,3 +27,16 @@ next-env.d.ts
 data/*.db
 data/*.db-wal
 data/*.db-shm
+
+# runtime
+.port
+.gstack/
+.coder-worktrees/
+logs/
+.claude/
+
+# stray empty DB artifact (real DB lives in data/)
+src/lib/db/fiverails.db
+
+# generated report artifacts (agent outputs, not source)
+data/reports/

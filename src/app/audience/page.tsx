@@ -30,7 +30,7 @@ interface Project {
 type ViewMode = "grid" | "calendar";
 
 const contentTypes = ["post", "email", "script", "lead_magnet", "landing_page"];
-const platforms = ["Twitter", "LinkedIn", "Facebook", "Instagram", "TikTok", "YouTube", "Email"];
+const platforms = ["Twitter", "LinkedIn", "Facebook", "Email"];
 const statuses = ["draft", "scheduled", "published", "archived"];
 
 const typeColors: Record<string, "amber" | "blue" | "emerald" | "violet" | "rose"> = {
@@ -80,7 +80,23 @@ export default function AudiencePage() {
     platform: "Twitter",
     status: "draft",
     project_id: "",
+    media_url: "",
   });
+
+  // AI Image generation state
+  const [showImageGen, setShowImageGen] = useState(false);
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [generatingImage, setGeneratingImage] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const [imagePreview, setImagePreview] = useState("");
+
+  // Edit modal AI Image state
+  const [showEditImageGen, setShowEditImageGen] = useState(false);
+  const [editImagePrompt, setEditImagePrompt] = useState("");
+  const [generatingEditImage, setGeneratingEditImage] = useState(false);
+  const [editImageError, setEditImageError] = useState("");
+  const [editImagePreview, setEditImagePreview] = useState("");
+  const [editMediaUrl, setEditMediaUrl] = useState("");
 
   const fetchData = () => {
     Promise.all([
@@ -97,6 +113,68 @@ export default function AudiencePage() {
     fetchData();
   }, []);
 
+  const handleGenerateImage = async (mode: "create" | "edit") => {
+    const prompt = mode === "create" ? imagePrompt : editImagePrompt;
+    if (!prompt.trim()) return;
+
+    if (mode === "create") {
+      setGeneratingImage(true);
+      setImageError("");
+    } else {
+      setGeneratingEditImage(true);
+      setEditImageError("");
+    }
+
+    try {
+      const res = await fetch("/api/media/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.url) {
+        if (mode === "create") {
+          setImagePreview(data.url);
+          setForm((prev) => ({ ...prev, media_url: data.url }));
+          setImagePrompt("");
+        } else {
+          setEditImagePreview(data.url);
+          setEditMediaUrl(data.url);
+          setEditImagePrompt("");
+        }
+      } else {
+        const errMsg = data.error || "Image generation failed";
+        const hint = data.hint ? ` ${data.hint}` : "";
+        if (res.status === 503) {
+          if (mode === "create") {
+            setImageError("Connect OpenAI in Settings \u2192 Connections to enable AI images.");
+          } else {
+            setEditImageError("Connect OpenAI in Settings \u2192 Connections to enable AI images.");
+          }
+        } else {
+          if (mode === "create") {
+            setImageError(errMsg + hint);
+          } else {
+            setEditImageError(errMsg + hint);
+          }
+        }
+      }
+    } catch {
+      if (mode === "create") {
+        setImageError("Network error generating image");
+      } else {
+        setEditImageError("Network error generating image");
+      }
+    } finally {
+      if (mode === "create") {
+        setGeneratingImage(false);
+      } else {
+        setGeneratingEditImage(false);
+      }
+    }
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.title.trim()) return;
@@ -108,8 +186,12 @@ export default function AudiencePage() {
         body: JSON.stringify(form),
       });
       if (res.ok) {
-        setForm({ title: "", type: "post", content: "", platform: "Twitter", status: "draft", project_id: "" });
+        setForm({ title: "", type: "post", content: "", platform: "Twitter", status: "draft", project_id: "", media_url: "" });
         setShowCreate(false);
+        setShowImageGen(false);
+        setImagePrompt("");
+        setImagePreview("");
+        setImageError("");
         fetchData();
       } else {
         setError("Failed to create content");
@@ -132,6 +214,12 @@ export default function AudiencePage() {
       scheduled_at: piece.scheduled_at ? piece.scheduled_at.slice(0, 16) : "",
       project_id: piece.project_id || "",
     });
+    // Reset edit image gen state
+    setShowEditImageGen(false);
+    setEditImagePrompt("");
+    setEditImagePreview("");
+    setEditImageError("");
+    setEditMediaUrl((piece as ContentPiece & { media_url?: string }).media_url || "");
   };
 
   const handleEdit = async (e: React.FormEvent) => {
@@ -146,6 +234,7 @@ export default function AudiencePage() {
         platform: editForm.platform,
         status: editForm.status,
         project_id: editForm.project_id || null,
+        media_url: editMediaUrl || null,
       };
       if (editForm.status === "scheduled" && editForm.scheduled_at) {
         payload.scheduled_at = new Date(editForm.scheduled_at).toISOString();
@@ -559,6 +648,86 @@ export default function AudiencePage() {
             onChange={(e) => setForm({ ...form, content: e.target.value })}
             rows={6}
           />
+
+          {/* AI Image Generation */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-[#94a3b8]">Image</label>
+              <button
+                type="button"
+                onClick={() => setShowImageGen(!showImageGen)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-colors cursor-pointer"
+              >
+                <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                  <path d="M7 1l1.5 3.5L12 6l-3.5 1.5L7 11 5.5 7.5 2 6l3.5-1.5L7 1z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M11 1l.5 1.5L13 3l-1.5.5L11 5l-.5-1.5L9 3l1.5-.5L11 1z" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" />
+                </svg>
+                Generate Image
+              </button>
+            </div>
+
+            {showImageGen && (
+              <div className="bg-[#0f1118] border border-[#1e293b] rounded-lg p-3 space-y-3">
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      placeholder="Describe the image you want..."
+                      value={imagePrompt}
+                      onChange={(e) => setImagePrompt(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleGenerateImage("create"); } }}
+                      className="w-full bg-[#141822] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] placeholder-[#64748b] focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateImage("create")}
+                    disabled={generatingImage || !imagePrompt.trim()}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-violet-500 text-white hover:bg-violet-600 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {generatingImage ? (
+                      <div className="animate-spin rounded-full h-3 w-3 border border-white border-t-transparent" />
+                    ) : (
+                      <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1l1.5 3.5L12 6l-3.5 1.5L7 11 5.5 7.5 2 6l3.5-1.5L7 1z" fill="currentColor" />
+                      </svg>
+                    )}
+                    {generatingImage ? "Generating..." : "Generate"}
+                  </button>
+                </div>
+                {imageError && (
+                  <p className="text-xs text-red-400">{imageError}</p>
+                )}
+              </div>
+            )}
+
+            {/* Image Preview */}
+            {(imagePreview || form.media_url) && (
+              <div className="flex items-start gap-3">
+                <div className="relative w-[200px] h-[200px] rounded-lg border border-[#1e293b] overflow-hidden flex-shrink-0">
+                  <img
+                    src={imagePreview || form.media_url}
+                    alt="Generated"
+                    className="w-full h-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImagePreview("");
+                      setForm((prev) => ({ ...prev, media_url: "" }));
+                    }}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center text-xs hover:bg-black/80 cursor-pointer"
+                  >
+                    &#x2715;
+                  </button>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-[#64748b] break-all">{form.media_url}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <Select
               label="Status"
@@ -620,6 +789,86 @@ export default function AudiencePage() {
             onChange={(e) => setEditForm({ ...editForm, content: e.target.value })}
             rows={6}
           />
+
+          {/* AI Image Generation (Edit) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-[#94a3b8]">Image</label>
+              <button
+                type="button"
+                onClick={() => setShowEditImageGen(!showEditImageGen)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-colors cursor-pointer"
+              >
+                <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                  <path d="M7 1l1.5 3.5L12 6l-3.5 1.5L7 11 5.5 7.5 2 6l3.5-1.5L7 1z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M11 1l.5 1.5L13 3l-1.5.5L11 5l-.5-1.5L9 3l1.5-.5L11 1z" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" />
+                </svg>
+                Generate Image
+              </button>
+            </div>
+
+            {showEditImageGen && (
+              <div className="bg-[#0f1118] border border-[#1e293b] rounded-lg p-3 space-y-3">
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      placeholder="Describe the image you want..."
+                      value={editImagePrompt}
+                      onChange={(e) => setEditImagePrompt(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleGenerateImage("edit"); } }}
+                      className="w-full bg-[#141822] border border-[#1e293b] rounded-lg px-3 py-2 text-sm text-[#e2e8f0] placeholder-[#64748b] focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateImage("edit")}
+                    disabled={generatingEditImage || !editImagePrompt.trim()}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-violet-500 text-white hover:bg-violet-600 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {generatingEditImage ? (
+                      <div className="animate-spin rounded-full h-3 w-3 border border-white border-t-transparent" />
+                    ) : (
+                      <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1l1.5 3.5L12 6l-3.5 1.5L7 11 5.5 7.5 2 6l3.5-1.5L7 1z" fill="currentColor" />
+                      </svg>
+                    )}
+                    {generatingEditImage ? "Generating..." : "Generate"}
+                  </button>
+                </div>
+                {editImageError && (
+                  <p className="text-xs text-red-400">{editImageError}</p>
+                )}
+              </div>
+            )}
+
+            {/* Image Preview (Edit) */}
+            {(editImagePreview || editMediaUrl) && (
+              <div className="flex items-start gap-3">
+                <div className="relative w-[200px] h-[200px] rounded-lg border border-[#1e293b] overflow-hidden flex-shrink-0">
+                  <img
+                    src={editImagePreview || editMediaUrl}
+                    alt="Content image"
+                    className="w-full h-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditImagePreview("");
+                      setEditMediaUrl("");
+                    }}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center text-xs hover:bg-black/80 cursor-pointer"
+                  >
+                    &#x2715;
+                  </button>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-[#64748b] break-all">{editImagePreview || editMediaUrl}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <Select
               label="Status"

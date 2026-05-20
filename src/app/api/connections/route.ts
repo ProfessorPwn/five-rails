@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     if (err) return NextResponse.json({ error: err }, { status: 400 });
     if (!isValidProvider(String(raw.provider))) {
       return NextResponse.json(
-        { error: "Invalid provider. Must be one of: openai, anthropic, ollama, perplexity, exa, firecrawl" },
+        { error: "Invalid provider. Must be one of: claude-cli, openai, anthropic, ollama, perplexity, exa, firecrawl" },
         { status: 400 }
       );
     }

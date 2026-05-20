@@ -231,27 +231,14 @@ async function callOllama(prompt: string, model: string, host: string): Promise<
 }
 
 async function callClaude(prompt: string, apiKey: string, model: string): Promise<string> {
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
-  let output = "";
-  for await (const msg of query({
-    prompt,
-    options: {
-      model,
-      env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: apiKey },
-      tools: [],
-      maxTurns: 1,
-      persistSession: false,
-    },
-  })) {
-    if (msg.type === "assistant" && msg.message?.content) {
-      for (const block of msg.message.content) {
-        if (block.type === "text") output += block.text;
-      }
-    } else if (msg.type === "result" && msg.subtype === "success") {
-      if (msg.result && !output) output = msg.result;
-    }
-  }
-  return output;
+  // Delegates to centralized SDK client (autoforge pattern)
+  const { querySDK } = await import("@/lib/ai/sdk-client");
+  const result = await querySDK(prompt, {
+    agentType: "executive",
+    connection: { provider: "anthropic", base_url: null, api_key_encrypted: apiKey, model },
+  });
+  if (result.status === "error") throw new Error(result.errorMessage || "Claude call failed");
+  return result.text;
 }
 
 async function callOpenAI(prompt: string, model: string, baseUrl: string, apiKey: string): Promise<string> {

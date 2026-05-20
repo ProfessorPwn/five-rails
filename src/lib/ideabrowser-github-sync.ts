@@ -196,9 +196,15 @@ async function extractIdeaFromImage(
         : `${base_url || "https://api.openai.com"}/v1/chat/completions`;
 
       if (provider === "anthropic") {
-        headers["x-api-key"] = api_key_encrypted || "";
+        const apiKey = api_key_encrypted || "";
+        const isOAuth = apiKey.startsWith("sk-ant-oat");
+        if (isOAuth) {
+          headers["Authorization"] = `Bearer ${apiKey}`;
+        } else {
+          headers["x-api-key"] = apiKey;
+          delete headers["Authorization"];
+        }
         headers["anthropic-version"] = "2023-06-01";
-        delete headers["Authorization"];
 
         const res = await fetch(apiUrl, {
           method: "POST",

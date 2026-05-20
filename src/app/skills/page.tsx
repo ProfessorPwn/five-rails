@@ -44,6 +44,10 @@ export default function SkillsPage() {
   const [execProject, setExecProject] = useState("");
   const [execResult, setExecResult] = useState("");
   const [execRunning, setExecRunning] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [savedContentId, setSavedContentId] = useState<string | null>(null);
+  const [publishingFromSkill, setPublishingFromSkill] = useState(false);
+  const [publishPlatform, setPublishPlatform] = useState("Twitter");
 
   useEffect(() => {
     Promise.all([
@@ -257,6 +261,116 @@ export default function SkillsPage() {
             <div className="bg-[#0f1118] border border-[#1e293b] rounded-lg p-4 max-h-80 overflow-y-auto">
               <div className="text-[10px] text-[#64748b] uppercase tracking-wider mb-2">Result</div>
               <pre className="text-sm text-[#e2e8f0] whitespace-pre-wrap font-mono">{execResult}</pre>
+              <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-[#1e293b]">
+                {saveError && (
+                  <div className="text-xs text-red-400">{saveError}</div>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={async () => {
+                      setSaveError("");
+                      try {
+                        const res = await fetch("/api/insights", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            title: `${execSkill?.name}${execProject ? "" : " (no project)"}`,
+                            description: execResult,
+                            source: execSkill?.name,
+                            category: "analysis",
+                            project_id: execProject || undefined,
+                          }),
+                        });
+                        if (res.ok) {
+                          setExecSkill(null);
+                        } else {
+                          setSaveError("Failed to save insight");
+                        }
+                      } catch {
+                        setSaveError("Failed to save insight");
+                      }
+                    }}
+                  >
+                    Save as Insight
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={async () => {
+                      setSaveError("");
+                      try {
+                        const res = await fetch("/api/content", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            type: "post",
+                            title: `${execSkill?.name}${execProject ? "" : " (no project)"}`,
+                            content: execResult,
+                            platform: publishPlatform,
+                            project_id: execProject || undefined,
+                          }),
+                        });
+                        if (res.ok) {
+                          const data = await res.json();
+                          setSavedContentId(data.id);
+                        } else {
+                          setSaveError("Failed to save content");
+                        }
+                      } catch {
+                        setSaveError("Failed to save content");
+                      }
+                    }}
+                  >
+                    Save as Content
+                  </Button>
+                  {!savedContentId && (
+                    <select
+                      value={publishPlatform}
+                      onChange={(e) => setPublishPlatform(e.target.value)}
+                      className="bg-[#0f1118] border border-[#1e293b] rounded px-2 py-1 text-[10px] text-[#e2e8f0] focus:outline-none focus:border-amber-500 cursor-pointer"
+                    >
+                      <option value="Twitter">Twitter / X</option>
+                      <option value="LinkedIn">LinkedIn</option>
+                      <option value="Facebook">Facebook</option>
+                      <option value="Instagram">Instagram</option>
+                      <option value="TikTok">TikTok</option>
+                      <option value="YouTube">YouTube</option>
+                      <option value="Email">Email</option>
+                      <option value="Blog">Blog</option>
+                    </select>
+                  )
+                  }
+                  {savedContentId && (
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        setPublishingFromSkill(true);
+                        setSaveError("");
+                        try {
+                          const res = await fetch(`/api/content/${savedContentId}/publish`, { method: "POST" });
+                          const data = await res.json();
+                          if (res.ok) {
+                            setSaveError("");
+                            setExecSkill(null);
+                            setSavedContentId(null);
+                          } else {
+                            setSaveError(data.error || "Publishing failed");
+                          }
+                        } catch {
+                          setSaveError("Network error while publishing");
+                        } finally {
+                          setPublishingFromSkill(false);
+                        }
+                      }}
+                      disabled={publishingFromSkill}
+                    >
+                      {publishingFromSkill ? "Publishing..." : `Publish to ${publishPlatform}`}
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>

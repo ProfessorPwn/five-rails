@@ -3,8 +3,9 @@ import { NextRequest } from "next/server";
 const MAX_STRING_LENGTH = 500;
 const MAX_TEXT_LENGTH = 10000;
 
-const VALID_PROVIDERS = new Set(["openai", "anthropic", "ollama", "perplexity", "exa", "firecrawl"]);
+const VALID_PROVIDERS = new Set(["openai", "anthropic", "ollama", "perplexity", "exa", "firecrawl", "claude-cli"]);
 const VALID_CONTENT_TYPES = new Set(["post", "email", "script", "lead_magnet", "landing_page"]);
+const VALID_PLATFORMS = new Set(["twitter", "linkedin", "facebook", "instagram", "tiktok", "youtube", "email"]);
 
 export function sanitize(input: unknown): string {
   if (typeof input !== "string") return String(input ?? "");
@@ -34,6 +35,10 @@ export function isValidContentType(type: string): boolean {
   return VALID_CONTENT_TYPES.has(type);
 }
 
+export function isValidPlatform(platform: string): boolean {
+  return VALID_PLATFORMS.has(platform.toLowerCase());
+}
+
 export function validateRequired(
   body: Record<string, unknown>,
   fields: string[]
@@ -58,6 +63,12 @@ export function sanitizeBody(
     }
   }
   return cleaned;
+}
+
+const VALID_IDEA_SYNC_STATUSES = new Set(["scraped", "manual", "modified"]);
+
+export function isValidIdeaSyncStatus(status: string): boolean {
+  return VALID_IDEA_SYNC_STATUSES.has(status);
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

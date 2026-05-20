@@ -7,8 +7,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get("project_id");
     const activity = projectId
-      ? await getProjectActivity(projectId)
-      : await getActivity();
+      ? getProjectActivity(projectId)
+      : getActivity();
     return NextResponse.json(activity);
   } catch (error) {
     console.error("GET /api/activity error:", error);

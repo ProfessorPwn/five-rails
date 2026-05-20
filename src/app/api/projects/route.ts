@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProjects, createProject, logActivity } from "@/lib/db";
+import { getProjects, createProject, logActivity, getAutomationSetting } from "@/lib/db";
 import { validateRequired, sanitizeBody, safeParseJson } from "@/lib/validation";
 
 export async function GET() {
@@ -23,11 +23,18 @@ export async function POST(request: NextRequest) {
     if (err) return NextResponse.json({ error: err }, { status: 400 });
     const body = sanitizeBody(raw, ["description"]);
     const project = await createProject(body);
-    await logActivity({
+    logActivity({
       action: "project_created",
       project_id: project.id,
       details: `Created project: ${body.name || "Untitled"}`,
     });
+
+    // Auto-generate action plan if enabled and project has a description
+    if (getAutomationSetting("auto_generate_plan") === "true" && body.description?.trim()) {
+      const baseUrl = request.nextUrl.origin;
+      fetch(`${baseUrl}/api/projects/${project.id}/generate-plan`, { method: "POST" }).catch(() => {});
+    }
+
     return NextResponse.json(project, { status: 201 });
   } catch (error) {
     console.error("POST /api/projects error:", error);

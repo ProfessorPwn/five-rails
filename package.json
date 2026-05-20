@@ -4,9 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "next dev",
+    "dev": "bash scripts/start.sh",
     "build": "next build",
     "start": "next start",
+    "port": "cat .port 2>/dev/null && echo || echo 'Not running (no .port file)'",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -17,16 +18,24 @@
     "@tailwindcss/postcss": "^4.2.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.5.0",
+    "@types/nodemailer": "^8.0.0",
     "@types/react": "^19.2.14",
     "@types/uuid": "^10.0.0",
     "better-sqlite3": "^12.8.0",
+    "google-trends-api": "^4.9.2",
     "next": "^16.1.6",
+    "nodemailer": "^8.0.5",
     "ollama": "^0.6.3",
+    "pdfkit": "^0.18.0",
     "postcss": "^8.5.8",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "recharts": "^3.8.1",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",
     "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/pdfkit": "^0.17.5"
   }
 }

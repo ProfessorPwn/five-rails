@@ -1,0 +1,29 @@
+{
+  "name": "five-rails-form-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Public-facing form service for Five Rails validation campaigns. Deploys to Vercel; pulls from / pushes to a local Five Rails instance via authenticated outbound HTTPS only.",
+  "scripts": {
+    "dev": "next dev -p 3100",
+    "build": "next build",
+    "start": "next start -p 3100",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "init-db": "tsx scripts/init-db.ts"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "postgres": "^3.4.5",
+    "uuid": "^11.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0"
+  }
+}

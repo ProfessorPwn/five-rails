@@ -330,6 +330,7 @@ function ConnectionsPage() {
     ollama: { base_url: "http://127.0.0.1:11434", model: "llama3" },
     openai: { base_url: "https://api.openai.com", model: "gpt-4o-mini" },
     anthropic: { base_url: "https://api.anthropic.com", model: "claude-sonnet-4-20250514" },
+    "claude-cli": { base_url: "", model: "claude-sonnet-4-20250514" },
     perplexity: { base_url: "https://api.perplexity.ai", model: "sonar" },
     exa: { base_url: "https://api.exa.ai", model: "" },
     firecrawl: { base_url: "https://api.firecrawl.dev", model: "" },
@@ -478,7 +479,7 @@ function ConnectionsPage() {
                       >
                         {conn.provider}
                       </h3>
-                      <Badge variant={conn.provider === "ollama" ? "emerald" : conn.provider === "anthropic" ? "violet" : "blue"}>
+                      <Badge variant={conn.provider === "ollama" ? "emerald" : conn.provider === "anthropic" || conn.provider === "claude-cli" ? "violet" : "blue"}>
                         {conn.provider}
                       </Badge>
                     </div>
@@ -516,16 +517,96 @@ function ConnectionsPage() {
               setForm({ ...form, provider: t, base_url: d.base_url, model: d.model });
             }}
             options={[
-              { value: "ollama", label: "Ollama" }, { value: "openai", label: "OpenAI" },
+              { value: "claude-cli", label: "Claude CLI (local auth)" }, { value: "ollama", label: "Ollama" }, { value: "openai", label: "OpenAI" },
               { value: "anthropic", label: "Anthropic" }, { value: "perplexity", label: "Perplexity" },
               { value: "exa", label: "Exa" }, { value: "firecrawl", label: "Firecrawl" },
             ]}
           />
           <Input label="Base URL" placeholder="https://api.openai.com" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} />
-          {form.provider !== "ollama" && (
-            <Input label={form.provider === "anthropic" ? "OAuth Token" : "API Key"} type="password"
-              placeholder={form.provider === "anthropic" ? "OAuth token from Claude CLI" : "sk-..."}
-              value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
+          {form.provider === "claude-cli" && (
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+              <p className="text-[11px] font-bold text-emerald-400">Uses Local CLI Auth</p>
+              <p className="text-[10px] text-[#8b949e] mt-1">No API key needed. Uses your existing Claude Code authentication from this machine.</p>
+            </div>
+          )}
+          {form.provider !== "ollama" && form.provider !== "claude-cli" && (
+            <div>
+              <Input label={form.provider === "anthropic" ? "OAuth Token" : "API Key"} type="password"
+                placeholder={form.provider === "anthropic" ? "Paste your Claude OAuth token" : "sk-..."}
+                value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
+              {form.provider === "anthropic" && (
+                <div className="mt-2 p-3 bg-violet-500/10 border border-violet-500/20 rounded-lg space-y-2">
+                  <p className="text-[11px] font-bold text-violet-400">Connect Claude Code</p>
+
+                  {/* One-click: detect existing token */}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch("/api/auth/claude-token");
+                        if (res.ok) {
+                          const data = await res.json();
+                          if (data.token) {
+                            setForm({ ...form, api_key: data.token, model: "claude-sonnet-4-20250514" });
+                          }
+                        } else {
+                          const err = await res.json();
+                          alert(err.hint || err.error || "Token not found");
+                        }
+                      } catch { alert("Failed to detect token"); }
+                    }}
+                    className="w-full py-2 text-[11px] font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
+                  >
+                    Auto-detect Token (from ~/.claude)
+                  </button>
+
+                  {/* One-click: save directly from credentials file */}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch("/api/auth/claude-token", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "save", model: "claude-sonnet-4-20250514" }),
+                        });
+                        const data = await res.json();
+                        if (data.created || data.updated) {
+                          alert("Claude connection saved! Refreshing...");
+                          window.location.reload();
+                        } else {
+                          alert(data.error || "Failed to save");
+                        }
+                      } catch { alert("Failed to save connection"); }
+                    }}
+                    className="w-full py-2 text-[11px] font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                  >
+                    One-Click Setup (detect + save + activate)
+                  </button>
+
+                  {/* Model selector */}
+                  <div className="pt-1">
+                    <p className="text-[9px] text-[#484f58] mb-1">Recommended models:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {[
+                        { id: "claude-sonnet-4-20250514", label: "Sonnet 4" },
+                        { id: "claude-opus-4-6", label: "Opus 4.6" },
+                        { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+                      ].map(m => (
+                        <button key={m.id} type="button"
+                          onClick={() => setForm({ ...form, model: m.id })}
+                          className={`text-[9px] px-2 py-0.5 rounded-full border transition-colors ${form.model === m.id ? "bg-violet-600 border-violet-500 text-white" : "border-[#30363d] text-[#8b949e] hover:border-violet-500"}`}
+                        >{m.label}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <p className="text-[9px] text-[#484f58]">
+                    No token? Run <code className="bg-[#21262d] px-1 rounded text-violet-300">claude auth login</code> in your terminal first.
+                  </p>
+                </div>
+              )}
+            </div>
           )}
           <Input label="Model" placeholder="e.g. gpt-4o-mini" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
           <div className="flex justify-end gap-3 pt-2">

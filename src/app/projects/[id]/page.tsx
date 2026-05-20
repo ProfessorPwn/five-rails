@@ -497,12 +497,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         }
       } else {
         // Save as content piece (landing_page, email, post, lead_magnet, script)
-        // Map saveAs type to default platform
+        // Map saveAs type to default platform (only publishable types get a platform)
         const platformMap: Record<string, string> = {
           post: "Twitter",
           email: "Email",
-          landing_page: "Blog",
-          lead_magnet: "Blog",
           script: "YouTube",
         };
         const res = await fetch("/api/content", {
@@ -512,7 +510,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             type: saveAs,
             title: actionResult.title,
             content: actionResult.output,
-            platform: platformMap[saveAs] || "Blog",
+            platform: platformMap[saveAs] || undefined,
             project_id: id,
           }),
         });

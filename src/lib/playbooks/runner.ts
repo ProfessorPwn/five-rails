@@ -89,6 +89,30 @@ export function completeRun(runId: string, opts: { status: "completed" | "failed
 
 const FETCH_TIMEOUT_MS = 120_000;
 
+// Cost estimation (Command Center Stage 5).
+// Token usage isn't returned by the skill execute endpoint today, so we
+// estimate from character counts. Rough industry heuristic: ~4 chars/token
+// (English prose). Pricing tracks Claude Sonnet 4 published rates as of
+// 2025: $3 / M input tokens, $15 / M output tokens. This is directional —
+// useful for ranking skills by relative spend and trending fleet cost,
+// not an exact billing number.
+const CHARS_PER_TOKEN = 4;
+const INPUT_USD_PER_MTOK = 3;
+const OUTPUT_USD_PER_MTOK = 15;
+
+export function estimateUsage(inputText: string, outputText: string): {
+  tokens_in: number;
+  tokens_out: number;
+  cost_usd: number;
+} {
+  const tokens_in = Math.ceil(inputText.length / CHARS_PER_TOKEN);
+  const tokens_out = Math.ceil(outputText.length / CHARS_PER_TOKEN);
+  const cost_usd =
+    (tokens_in * INPUT_USD_PER_MTOK + tokens_out * OUTPUT_USD_PER_MTOK) /
+    1_000_000;
+  return { tokens_in, tokens_out, cost_usd };
+}
+
 export async function executeSkill(opts: {
   baseUrl: string;
   skillId: string;
@@ -156,16 +180,32 @@ export async function executeSkill(opts: {
 
     const data = await res.json();
     const output = (data.output as string | undefined) ?? "";
+    const usage = estimateUsage(opts.input, output);
     getDb().prepare(
       `UPDATE skill_executions
-       SET status = 'completed', duration_ms = ?, output_excerpt = ?, completed_at = datetime('now')
+       SET status = 'completed', duration_ms = ?, output_excerpt = ?,
+           tokens_in = ?, tokens_out = ?, cost_usd = ?,
+           completed_at = datetime('now')
        WHERE id = ?`,
-    ).run(Date.now() - startMs, output.slice(0, 500), execId);
+    ).run(
+      Date.now() - startMs,
+      output.slice(0, 500),
+      usage.tokens_in,
+      usage.tokens_out,
+      usage.cost_usd,
+      execId,
+    );
     emitEvent({
       type: "skill_completed",
       entityType: "skill_execution",
       entityId: execId,
-      payload: { skill_id: opts.skillId, duration_ms: Date.now() - startMs },
+      payload: {
+        skill_id: opts.skillId,
+        duration_ms: Date.now() - startMs,
+        tokens_in: usage.tokens_in,
+        tokens_out: usage.tokens_out,
+        cost_usd: usage.cost_usd,
+      },
     });
 
     return { ok: true, output };

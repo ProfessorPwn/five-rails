@@ -65,6 +65,18 @@ const sections = [
           </svg>
         ),
       },
+      {
+        name: "Agent Metrics",
+        href: "/metrics/agents",
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path d="M2 14V4M2 14h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <rect x="5" y="9" width="2" height="4" rx="0.4" fill="currentColor" />
+            <rect x="8.5" y="6" width="2" height="7" rx="0.4" fill="currentColor" />
+            <rect x="12" y="3" width="2" height="10" rx="0.4" fill="currentColor" />
+          </svg>
+        ),
+      },
     ],
   },
   {

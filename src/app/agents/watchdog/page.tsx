@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import CapabilityGapInbox from "@/components/command/CapabilityGapInbox";
 
 interface WatchdogStats {
   total_incidents: number;
@@ -544,6 +545,9 @@ export default function WatchdogPage() {
             <div className="text-xs text-[#484f58] mt-1">{stats.escalated_count} escalated</div>
           </div>
         </div>
+
+        {/* Capability Gap Inbox (Command Center Stage 4) */}
+        <CapabilityGapInbox />
 
         {/* Tabs */}
         <div className="flex gap-1 mb-6 bg-[#161b22] border border-[#30363d] rounded-lg p-1 w-fit">

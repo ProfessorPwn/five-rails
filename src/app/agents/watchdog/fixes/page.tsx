@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 
 interface Fix {
   id: string;
@@ -260,6 +260,9 @@ function FixDrawer({
         </div>
 
         <div className="px-6 py-6 space-y-6">
+          {/* Status timeline (Command Center Stage 4) */}
+          <FixStatusTimeline fix={fix} />
+
           <div>
             <div className="text-[10px] uppercase tracking-wide text-[#64748b] mb-1">Fix ID</div>
             <code className="text-[11px] text-[#94a3b8]">{fix.id}</code>
@@ -321,25 +324,7 @@ function FixDrawer({
             </div>
           )}
 
-          {fix.diff && (
-            <div>
-              <div className="text-[10px] uppercase tracking-wide text-[#64748b] mb-1.5">Diff</div>
-              <pre className="text-[11px] font-mono whitespace-pre overflow-x-auto p-3 bg-black border border-[#1e293b]/40 rounded-lg max-h-96 leading-relaxed">
-                {fix.diff.split("\n").map((line, i) => {
-                  const cls = line.startsWith("+++") || line.startsWith("---")
-                    ? "text-[#94a3b8]"
-                    : line.startsWith("+")
-                    ? "text-emerald-300"
-                    : line.startsWith("-")
-                    ? "text-rose-300"
-                    : line.startsWith("@@")
-                    ? "text-sky-300"
-                    : "text-[#cbd5e1]";
-                  return <span key={i} className={`block ${cls}`}>{line || " "}</span>;
-                })}
-              </pre>
-            </div>
-          )}
+          {fix.diff && <DiffViewer diff={fix.diff} />}
 
           {/* Action buttons */}
           <div className="flex flex-wrap gap-2">
@@ -385,6 +370,166 @@ function FixDrawer({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Status timeline (Stage 4) ──────────────────────────────────────────────
+
+function FixStatusTimeline({ fix }: { fix: Fix }) {
+  interface Step { label: string; at: string | null; tone: string; }
+  const steps: Step[] = [
+    { label: "Detected", at: fix.created_at, tone: "border-amber-500/30 text-amber-400" },
+    {
+      label: fix.status === "rejected" ? "Rejected"
+           : fix.status === "failed" ? "Failed"
+           : "Applied",
+      at: fix.applied_at,
+      tone: fix.status === "rejected" || fix.status === "failed"
+        ? "border-rose-500/40 text-rose-400"
+        : "border-emerald-500/40 text-emerald-400",
+    },
+  ];
+  if (fix.status === "rolled_back" || fix.rolled_back_at) {
+    steps.push({
+      label: "Rolled back",
+      at: fix.rolled_back_at,
+      tone: "border-rose-500/40 text-rose-400",
+    });
+  }
+
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-[#64748b] mb-2">Status timeline</div>
+      <ol className="relative border-l border-[#1e293b]/60 ml-2 space-y-3">
+        {steps.map((step, i) => (
+          <li key={i} className="ml-4">
+            <span className={`absolute -left-[5px] w-2.5 h-2.5 rounded-full border-2 ${step.tone} bg-[#0a0c14]`} aria-hidden="true" />
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] uppercase tracking-widest px-1.5 py-0.5 border rounded ${step.tone}`}>
+                {step.label}
+              </span>
+              <span className="text-[10px] text-[#64748b]">
+                {step.at ? new Date(step.at.replace(" ", "T") + (step.at.endsWith("Z") ? "" : "Z")).toLocaleString() : "—"}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+// ─── Diff viewer with unified / side-by-side toggle (Stage 4) ───────────────
+
+interface DiffPair { left: string | null; right: string | null; tone: "ctx" | "add" | "del" | "hdr" | "hunk"; }
+
+function buildSideBySide(diff: string): DiffPair[] {
+  const pairs: DiffPair[] = [];
+  const lines = diff.split("\n");
+  let pendingDels: string[] = [];
+
+  const flushDels = () => {
+    for (const d of pendingDels) pairs.push({ left: d, right: null, tone: "del" });
+    pendingDels = [];
+  };
+
+  for (const line of lines) {
+    if (line.startsWith("+++") || line.startsWith("---")) {
+      flushDels();
+      pairs.push({ left: line, right: line, tone: "hdr" });
+      continue;
+    }
+    if (line.startsWith("@@")) {
+      flushDels();
+      pairs.push({ left: line, right: line, tone: "hunk" });
+      continue;
+    }
+    if (line.startsWith("-")) {
+      pendingDels.push(line);
+      continue;
+    }
+    if (line.startsWith("+")) {
+      if (pendingDels.length > 0) {
+        // Pair up with the first pending deletion.
+        const left = pendingDels.shift() ?? null;
+        pairs.push({ left, right: line, tone: left ? "del" : "add" });
+        continue;
+      }
+      pairs.push({ left: null, right: line, tone: "add" });
+      continue;
+    }
+    flushDels();
+    pairs.push({ left: line, right: line, tone: "ctx" });
+  }
+  flushDels();
+  return pairs;
+}
+
+function DiffViewer({ diff }: { diff: string }) {
+  const [mode, setMode] = useState<"unified" | "split">("unified");
+  const pairs = useMemo(() => mode === "split" ? buildSideBySide(diff) : null, [diff, mode]);
+
+  const cls = (line: string) =>
+    line.startsWith("+++") || line.startsWith("---") ? "text-[#94a3b8]"
+    : line.startsWith("+") ? "text-emerald-300"
+    : line.startsWith("-") ? "text-rose-300"
+    : line.startsWith("@@") ? "text-sky-300"
+    : "text-[#cbd5e1]";
+
+  const cellCls = (tone: DiffPair["tone"], side: "left" | "right") => {
+    if (tone === "hdr") return "text-[#94a3b8] bg-[#0d0f17]";
+    if (tone === "hunk") return "text-sky-300 bg-[#0d0f17]";
+    if (tone === "add" && side === "right") return "text-emerald-300 bg-emerald-500/5";
+    if (tone === "del" && side === "left") return "text-rose-300 bg-rose-500/5";
+    return "text-[#cbd5e1]";
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-[10px] uppercase tracking-wide text-[#64748b]">Diff</div>
+        <div className="flex items-center gap-1 bg-[#141822] border border-[#1e293b] rounded-md p-0.5">
+          <button
+            type="button"
+            onClick={() => setMode("unified")}
+            className={`px-2 py-0.5 text-[10px] uppercase tracking-widest rounded ${
+              mode === "unified" ? "bg-amber-500/15 text-amber-400" : "text-[#94a3b8] hover:text-[#e2e8f0]"
+            }`}
+          >
+            Unified
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("split")}
+            className={`px-2 py-0.5 text-[10px] uppercase tracking-widest rounded ${
+              mode === "split" ? "bg-amber-500/15 text-amber-400" : "text-[#94a3b8] hover:text-[#e2e8f0]"
+            }`}
+          >
+            Split
+          </button>
+        </div>
+      </div>
+      {mode === "unified" ? (
+        <pre className="text-[11px] font-mono whitespace-pre overflow-x-auto p-3 bg-black border border-[#1e293b]/40 rounded-lg max-h-96 leading-relaxed">
+          {diff.split("\n").map((line, i) => (
+            <span key={i} className={`block ${cls(line)}`}>{line || " "}</span>
+          ))}
+        </pre>
+      ) : (
+        <div className="grid grid-cols-2 gap-0 text-[11px] font-mono bg-black border border-[#1e293b]/40 rounded-lg overflow-x-auto max-h-96 overflow-y-auto leading-relaxed">
+          {(pairs ?? []).map((p, i) => (
+            <div key={`pair-${i}`} className="contents">
+              <pre className={`px-3 py-px whitespace-pre border-r border-[#1e293b]/40 ${cellCls(p.tone, "left")}`}>
+                {p.left ?? " "}
+              </pre>
+              <pre className={`px-3 py-px whitespace-pre ${cellCls(p.tone, "right")}`}>
+                {p.right ?? " "}
+              </pre>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

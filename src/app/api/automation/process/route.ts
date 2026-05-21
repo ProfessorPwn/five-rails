@@ -557,6 +557,54 @@ export async function POST(request: NextRequest) {
       results.project_playbooks = { error: err instanceof Error ? err.message.slice(0, 200) : "failed" };
     }
 
+    // ─── Command Center: agent_state writeback ────────────────────────────────
+    // Derive a high-level operator-view state per agent (idle/working/blocked/
+    // error) from the most recent run + active tasks + recent failures. This
+    // powers the dashboard fleet grid + /api/command/overview without forcing
+    // every code path to write the state explicitly.
+    try {
+      const { getDb } = await import("@/lib/db");
+      const db = getDb();
+      const update = db.prepare(
+        `UPDATE agents SET agent_state = ?, current_task_id = ? WHERE id = ?`
+      );
+      const agentsRows = db.prepare(
+        `SELECT id FROM agents WHERE is_active = 1`
+      ).all() as Array<{ id: string }>;
+      let updated = 0;
+      for (const { id } of agentsRows) {
+        const workingTask = db.prepare(
+          `SELECT id FROM agent_tasks WHERE agent_id = ? AND status = 'working' ORDER BY started_at DESC LIMIT 1`
+        ).get(id) as { id: string } | undefined;
+        const blockedTask = db.prepare(
+          `SELECT id FROM agent_tasks WHERE agent_id = ? AND status = 'blocked' LIMIT 1`
+        ).get(id) as { id: string } | undefined;
+        const lastRun = db.prepare(
+          `SELECT status, started_at FROM agent_runs WHERE agent_id = ? ORDER BY started_at DESC LIMIT 1`
+        ).get(id) as { status: string; started_at: string } | undefined;
+
+        let nextState: "idle" | "working" | "blocked" | "error" = "idle";
+        let currentTaskId: string | null = null;
+        if (workingTask) {
+          nextState = "working";
+          currentTaskId = workingTask.id;
+        } else if (blockedTask) {
+          nextState = "blocked";
+          currentTaskId = blockedTask.id;
+        } else if (lastRun && (lastRun.status === "failed" || lastRun.status === "timeout")) {
+          // Only flag as error if the failure is recent (<2 hours). Older
+          // failures shouldn't keep an idle agent in an error state forever.
+          const ageMs = Date.now() - new Date(lastRun.started_at.replace(" ", "T") + "Z").getTime();
+          if (Number.isFinite(ageMs) && ageMs < 2 * 60 * 60 * 1000) nextState = "error";
+        }
+        update.run(nextState, currentTaskId, id);
+        updated++;
+      }
+      results.agent_state_writeback = { updated };
+    } catch (err) {
+      results.agent_state_writeback = { error: err instanceof Error ? err.message.slice(0, 200) : "failed" };
+    }
+
     completeAutomationRun(runId, results);
 
     logActivity({

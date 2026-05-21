@@ -7,6 +7,9 @@ interface Agent {
   id: string; name: string; department: string; state: string;
   last_run_at: string | null; next_run_at: string | null; schedule: string;
   total_decisions: number; decisions_today: number; chats_today: number; unread_messages: number;
+  current_task_label?: string | null;
+  queue_depth?: number;
+  last_run_status?: "running" | "completed" | "failed" | "timeout" | null;
 }
 
 interface Decision {
@@ -151,11 +154,38 @@ export default function AgentsPage() {
                 </div>
 
                 {/* Stats row */}
-                <div className="flex justify-between text-[9px] text-[#484f58] mb-3">
+                <div className="flex justify-between text-[9px] text-[#484f58] mb-2">
                   <span>{agent.decisions_today}d</span>
                   <span>{agent.chats_today}c</span>
                   <span className={agent.unread_messages > 0 ? "text-amber-400 font-bold" : ""}>{agent.unread_messages}m</span>
                 </div>
+
+                {/* Queue depth + last-run status (Command Center Stage 2) */}
+                {(agent.queue_depth && agent.queue_depth > 0) || agent.last_run_status ? (
+                  <div className="flex items-center justify-between text-[9px] mb-2">
+                    {agent.queue_depth && agent.queue_depth > 0 ? (
+                      <span className="text-amber-400/80">
+                        {agent.queue_depth} queued
+                      </span>
+                    ) : <span />}
+                    {agent.last_run_status ? (
+                      <span className={
+                        agent.last_run_status === "completed" ? "text-emerald-400/80" :
+                        agent.last_run_status === "running" ? "text-sky-400/80" :
+                        "text-rose-400/80"
+                      }>
+                        {agent.last_run_status}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {/* Current task (Command Center Stage 2) */}
+                {agent.current_task_label ? (
+                  <div className="text-[9px] text-[#94a3b8] mb-2 truncate" title={agent.current_task_label}>
+                    → {agent.current_task_label}
+                  </div>
+                ) : null}
 
                 {/* Next run */}
                 {agent.next_run_at && (

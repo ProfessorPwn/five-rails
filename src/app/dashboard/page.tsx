@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
+import AttentionQueue from "@/components/command/AttentionQueue";
 import { useRouter } from "next/navigation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -297,6 +298,11 @@ export default function DashboardPage() {
           icon={<AgentIcon />}
         />
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          Attention Queue (Command Center Stage 2)
+          ═══════════════════════════════════════════════════════════════════════ */}
+      <AttentionQueue />
 
       {/* ═══════════════════════════════════════════════════════════════════════
           ROW 2: Agent Status Bar

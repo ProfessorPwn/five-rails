@@ -42,6 +42,29 @@ const sections = [
           </svg>
         ),
       },
+      {
+        name: "Inbox",
+        href: "/inbox",
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path d="M2 11l2-7h10l2 7v3a1 1 0 01-1 1H3a1 1 0 01-1-1v-3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+            <path d="M2 11h4l1 2h4l1-2h4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+          </svg>
+        ),
+      },
+      {
+        name: "Traces",
+        href: "/traces",
+        icon: (
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <circle cx="3" cy="9" r="1.5" fill="currentColor" />
+            <circle cx="9" cy="5" r="1.5" fill="currentColor" />
+            <circle cx="9" cy="13" r="1.5" fill="currentColor" />
+            <circle cx="15" cy="9" r="1.5" fill="currentColor" />
+            <path d="M3 9l6-4M3 9l6 4M9 5l6 4M9 13l6-4" stroke="currentColor" strokeWidth="1" />
+          </svg>
+        ),
+      },
     ],
   },
   {

@@ -45,6 +45,16 @@ export function startRun(opts: {
     `INSERT INTO playbook_runs (id, playbook_name, trigger_entity_type, trigger_entity_id, status)
      VALUES (?, ?, ?, ?, 'running')`,
   ).run(id, opts.playbookName, opts.triggerEntityType ?? null, opts.triggerEntityId ?? null);
+  emitEvent({
+    type: "playbook_started",
+    entityType: "playbook_run",
+    entityId: id,
+    payload: {
+      playbook_name: opts.playbookName,
+      trigger_entity_type: opts.triggerEntityType ?? null,
+      trigger_entity_id: opts.triggerEntityId ?? null,
+    },
+  });
   return { run_id: id, alreadyRan: false };
 }
 
@@ -63,6 +73,16 @@ export function completeRun(runId: string, opts: { status: "completed" | "failed
      SET status = ?, result = ?, error = ?, completed_at = datetime('now')
      WHERE id = ?`,
   ).run(opts.status, opts.result ?? null, opts.error ?? null, runId);
+  emitEvent({
+    type: "playbook_completed",
+    entityType: "playbook_run",
+    entityId: runId,
+    payload: {
+      status: opts.status,
+      result: opts.result?.slice(0, 200) ?? null,
+      error: opts.error?.slice(0, 200) ?? null,
+    },
+  });
 }
 
 // ── Step helpers ────────────────────────────────────────────────────────────
@@ -74,8 +94,39 @@ export async function executeSkill(opts: {
   skillId: string;
   input: string;
   projectId?: string | null;
+  agentId?: string | null;
+  runId?: string | null;
 }): Promise<{ ok: boolean; output: string; error?: string }> {
+  const execId = uuidv4();
+  const startedAt = new Date().toISOString();
+  const startMs = Date.now();
   try {
+    // Stage 3: log start so the /traces view has a row even for in-flight skills.
+    getDb().prepare(
+      `INSERT INTO skill_executions
+       (id, skill_id, agent_id, run_id, project_id, input_excerpt, status, started_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'running', ?)`,
+    ).run(
+      execId,
+      opts.skillId,
+      opts.agentId ?? null,
+      opts.runId ?? null,
+      opts.projectId ?? null,
+      opts.input.slice(0, 500),
+      startedAt,
+    );
+    emitEvent({
+      type: "skill_started",
+      entityType: "skill_execution",
+      entityId: execId,
+      sourceAgentId: opts.agentId ?? undefined,
+      payload: {
+        skill_id: opts.skillId,
+        project_id: opts.projectId ?? null,
+        run_id: opts.runId ?? null,
+      },
+    });
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     const res = await fetch(`${opts.baseUrl}/api/skills/${opts.skillId}/execute`, {
@@ -85,14 +136,51 @@ export async function executeSkill(opts: {
       signal: controller.signal,
     });
     clearTimeout(timer);
+
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      return { ok: false, output: "", error: `HTTP ${res.status}: ${text.slice(0, 300)}` };
+      const error = `HTTP ${res.status}: ${text.slice(0, 300)}`;
+      getDb().prepare(
+        `UPDATE skill_executions
+         SET status = 'failed', duration_ms = ?, error = ?, completed_at = datetime('now')
+         WHERE id = ?`,
+      ).run(Date.now() - startMs, error, execId);
+      emitEvent({
+        type: "skill_failed",
+        entityType: "skill_execution",
+        entityId: execId,
+        payload: { skill_id: opts.skillId, error },
+      });
+      return { ok: false, output: "", error };
     }
+
     const data = await res.json();
-    return { ok: true, output: data.output || "" };
+    const output = (data.output as string | undefined) ?? "";
+    getDb().prepare(
+      `UPDATE skill_executions
+       SET status = 'completed', duration_ms = ?, output_excerpt = ?, completed_at = datetime('now')
+       WHERE id = ?`,
+    ).run(Date.now() - startMs, output.slice(0, 500), execId);
+    emitEvent({
+      type: "skill_completed",
+      entityType: "skill_execution",
+      entityId: execId,
+      payload: { skill_id: opts.skillId, duration_ms: Date.now() - startMs },
+    });
+
+    return { ok: true, output };
   } catch (err) {
-    return { ok: false, output: "", error: err instanceof Error ? err.message : String(err) };
+    const error = err instanceof Error ? err.message : String(err);
+    try {
+      getDb().prepare(
+        `UPDATE skill_executions
+         SET status = 'failed', duration_ms = ?, error = ?, completed_at = datetime('now')
+         WHERE id = ?`,
+      ).run(Date.now() - startMs, error, execId);
+    } catch {
+      // execution row write failed — swallow, primary error is what matters
+    }
+    return { ok: false, output: "", error };
   }
 }
 
@@ -102,18 +190,77 @@ export function createHandoff(opts: {
   message: string;
   messageType?: "info" | "request" | "handoff" | "alert";
   deadlineMinutes?: number;
+  priority?: "low" | "normal" | "high" | "urgent";
+  playbookRunId?: string;
 }): string {
   const db = getDb();
   const id = uuidv4();
   const deadlineAt = opts.deadlineMinutes
     ? new Date(Date.now() + opts.deadlineMinutes * 60_000).toISOString()
     : null;
+  const messageType = opts.messageType ?? "handoff";
+  // Auto-priority based on message_type if not explicitly set. Alerts are
+  // urgent, handoffs are high, requests are normal, info is low.
+  const priority = opts.priority ?? (
+    messageType === "alert" ? "urgent" :
+    messageType === "handoff" ? "high" :
+    messageType === "request" ? "normal" :
+    "low"
+  );
   db.prepare(
     `INSERT INTO agent_messages
-     (id, from_agent_id, to_agent_id, message, message_type, deadline_at, is_read)
-     VALUES (?, ?, ?, ?, ?, ?, 0)`,
-  ).run(id, opts.fromAgentId, opts.toAgentId, opts.message, opts.messageType ?? "handoff", deadlineAt);
+     (id, from_agent_id, to_agent_id, message, message_type, deadline_at, is_read, priority)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+  ).run(id, opts.fromAgentId, opts.toAgentId, opts.message, messageType, deadlineAt, priority);
+
+  emitEvent({
+    type: "handoff_created",
+    entityType: "message",
+    entityId: id,
+    sourceAgentId: opts.fromAgentId,
+    payload: {
+      to_agent_id: opts.toAgentId,
+      message_type: messageType,
+      priority,
+      playbook_run_id: opts.playbookRunId ?? null,
+      excerpt: opts.message.slice(0, 200),
+    },
+  });
+
   return id;
+}
+
+// ── Event emission (Command Center Stage 3) ─────────────────────────────────
+// The `events` table is a thin in-process log used by the /traces view to
+// assemble a unified reasoning chain. It is NOT a replacement event bus —
+// scheduling stays in /api/automation/process. Writers are opt-in; absence
+// of an event doesn't break any caller.
+
+export interface EmitEventOpts {
+  type: string;
+  entityType?: string;
+  entityId?: string;
+  sourceAgentId?: string;
+  payload?: Record<string, unknown>;
+}
+
+export function emitEvent(opts: EmitEventOpts): void {
+  try {
+    getDb().prepare(
+      `INSERT INTO events (id, type, entity_type, entity_id, source_agent_id, payload_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      uuidv4(),
+      opts.type,
+      opts.entityType ?? null,
+      opts.entityId ?? null,
+      opts.sourceAgentId ?? null,
+      opts.payload ? JSON.stringify(opts.payload) : null,
+    );
+  } catch {
+    // Events are a trace-spine convenience; never let an emit failure
+    // break the calling playbook/agent code path.
+  }
 }
 
 export function logPlaybookActivity(playbookName: string, message: string, projectId?: string | null) {

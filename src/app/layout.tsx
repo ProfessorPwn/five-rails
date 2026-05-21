@@ -9,6 +9,7 @@ import { ToastProvider } from "@/components/ui/Toast";
 // heartbeat (scripts/watchdog-daemon.ts). Running the scheduler in every
 // browser tab fired redundant heartbeats and contributed to dev-server saturation.
 import CommandPalette from "@/components/CommandPalette";
+import KeyboardShortcuts from "@/components/command/KeyboardShortcuts";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans bg-[#0a0c14] text-[#e2e8f0] min-h-screen antialiased noise-overlay" suppressHydrationWarning>
         <ToastProvider>
           <CommandPalette />
+          <KeyboardShortcuts />
           <div className="flex min-h-screen">
             <Suspense><Sidebar /></Suspense>
             <div className="flex-1 ml-64 flex flex-col">

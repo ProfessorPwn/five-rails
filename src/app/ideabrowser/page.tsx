@@ -511,6 +511,38 @@ export default function IdeaBrowserPage() {
 
   const [scoreResult, setScoreResult] = useState<string | null>(null);
 
+  // ─── Intake pause toggle ────────────────────────────────────────────────
+  // Lets the operator freeze new-idea ingestion (Step 10 of the heartbeat)
+  // and the Idea Validation Gate (Step 19) while the fleet focuses on a
+  // specific operator-supplied idea. Reads + writes automation_settings
+  // via the existing endpoint.
+  const [intakePaused, setIntakePaused] = useState(false);
+  const [intakeToggling, setIntakeToggling] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/automation/settings", { cache: "no-store" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((s) => {
+        if (!cancelled && s) setIntakePaused(s.ideabrowser_intake_paused === "true");
+      })
+      .catch(() => { /* silent */ });
+    return () => { cancelled = true; };
+  }, []);
+  const toggleIntake = async () => {
+    setIntakeToggling(true);
+    const next = !intakePaused;
+    try {
+      const res = await fetch("/api/automation/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "ideabrowser_intake_paused", value: next ? "true" : "false" }),
+      });
+      if (res.ok) setIntakePaused(next);
+    } finally {
+      setIntakeToggling(false);
+    }
+  };
+
   const runScoring = async () => {
     setScoring(true);
     setScoreResult(null);
@@ -575,6 +607,22 @@ export default function IdeaBrowserPage() {
             ))}
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={toggleIntake}
+              disabled={intakeToggling}
+              title={intakePaused
+                ? "Intake is paused. New ideas will not be pulled and the validation gate is skipped. Click to resume."
+                : "Pause IdeaBrowser intake — stops daily sync and freezes the validation gate. Use this to focus the fleet on a specific idea."}
+              className={`text-xs px-3 py-1.5 rounded-lg transition-colors border ${
+                intakePaused
+                  ? "bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100"
+                  : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+              } disabled:opacity-50`}
+            >
+              {intakeToggling
+                ? (intakePaused ? "Resuming…" : "Pausing…")
+                : (intakePaused ? "▶  Resume Intake" : "⏸  Pause Intake")}
+            </button>
             <button onClick={runScoring} disabled={scoring} className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
               {scoring ? "Scoring..." : "Score All Ideas"}
             </button>

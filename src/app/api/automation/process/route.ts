@@ -329,17 +329,24 @@ export async function POST(request: NextRequest) {
 
     // 10. Daily IdeaBrowser sync — pull latest idea and assign to Research agent
     try {
-      const lastSync = getAutomationSetting("last_ideabrowser_sync_date");
-      const todayStr = new Date().toISOString().slice(0, 10);
-      if (lastSync !== todayStr) {
-        const syncRes = await fetch(`${baseUrl}/api/automation/sync-ideabrowser`, { method: "POST" });
-        if (syncRes.ok) {
-          const syncData = await syncRes.json();
-          results.ideabrowser_sync = syncData.imported ? { imported: syncData.title, assigned: syncData.assigned_to } : { skipped: syncData.message };
-          setAutomationSetting("last_ideabrowser_sync_date", todayStr);
-        }
+      // Pause gate: when the operator pauses intake (e.g. to focus the fleet on
+      // an operator-supplied idea), skip pulling new ideas. The Validation Gate
+      // below is also gated by the same flag so no new ideas enter the funnel.
+      if (getAutomationSetting("ideabrowser_intake_paused") === "true") {
+        results.ideabrowser_sync = { skipped: "intake paused by operator" };
       } else {
-        results.ideabrowser_sync = { skipped: "already synced today" };
+        const lastSync = getAutomationSetting("last_ideabrowser_sync_date");
+        const todayStr = new Date().toISOString().slice(0, 10);
+        if (lastSync !== todayStr) {
+          const syncRes = await fetch(`${baseUrl}/api/automation/sync-ideabrowser`, { method: "POST" });
+          if (syncRes.ok) {
+            const syncData = await syncRes.json();
+            results.ideabrowser_sync = syncData.imported ? { imported: syncData.title, assigned: syncData.assigned_to } : { skipped: syncData.message };
+            setAutomationSetting("last_ideabrowser_sync_date", todayStr);
+          }
+        } else {
+          results.ideabrowser_sync = { skipped: "already synced today" };
+        }
       }
     } catch { results.ideabrowser_sync = { error: "failed" }; }
 
@@ -521,16 +528,22 @@ export async function POST(request: NextRequest) {
 
     // 19. Idea Validation Gate — Thiel #20. Ideas scoring ≥60 that haven't
     // been through the gate yet. Cap 2 per tick (each step is an LLM call).
+    // Gated by the same `ideabrowser_intake_paused` flag as Step 10 — when
+    // intake is paused, no new ideas should run through the gate either.
     try {
-      const { findIdeasReadyForValidation } = await import("@/lib/playbooks/runner");
-      const { runIdeaValidationGate } = await import("@/lib/playbooks/idea-validation-gate");
-      const ideas = findIdeasReadyForValidation(2);
-      let processed = 0;
-      for (const i of ideas) {
-        const r = await runIdeaValidationGate({ baseUrl, ideaId: i.entityId });
-        if (r.ok) processed++;
+      if (getAutomationSetting("ideabrowser_intake_paused") === "true") {
+        results.idea_validation_gate = { skipped: "intake paused by operator" };
+      } else {
+        const { findIdeasReadyForValidation } = await import("@/lib/playbooks/runner");
+        const { runIdeaValidationGate } = await import("@/lib/playbooks/idea-validation-gate");
+        const ideas = findIdeasReadyForValidation(2);
+        let processed = 0;
+        for (const i of ideas) {
+          const r = await runIdeaValidationGate({ baseUrl, ideaId: i.entityId });
+          if (r.ok) processed++;
+        }
+        results.idea_validation_gate = { found: ideas.length, processed };
       }
-      results.idea_validation_gate = { found: ideas.length, processed };
     } catch (err) {
       results.idea_validation_gate = { error: err instanceof Error ? err.message.slice(0, 200) : "failed" };
     }
